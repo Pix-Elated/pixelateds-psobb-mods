@@ -1,0 +1,34 @@
+MIT License
+
+Copyright (c) 2026 Pix-Elated
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This project bundles third-party code under their own licenses:
+
+- deps/minhook/       — MinHook, BSD 2-Clause License (see deps/minhook/LICENSE.txt)
+- deps/reshade/       — ReShade add-on SDK headers, BSD 3-Clause (see deps/reshade/LICENSE.md)
+- deps/reshade/deps/imgui/ — Dear ImGui headers, MIT License (see deps/reshade/deps/imgui/LICENSE.txt)
+
+Item / technique / special-attack name data in pso_hud_items.txt,
+pso_hud_techs.txt, and pso_hud_specials.txt is factual information derived
+from Phantasy Star Online Blue Burst game data and published alongside
+Jake's Drop Checker Lua add-on (https://github.com/jakeprobst/psodropcheckaddon).

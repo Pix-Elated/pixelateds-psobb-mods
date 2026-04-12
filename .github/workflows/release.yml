@@ -1,0 +1,120 @@
+# GitHub Actions release workflow.
+#
+# Fires on tag push (v*.*.*) OR on manual dispatch. Builds
+# pixelated_mods.addon32 with MSVC x86, packages it with the data
+# files + readme + install instructions + license, and publishes a
+# single release zip on the tag's GitHub Release:
+#
+#   pixelateds-psobb-mods-<ver>.zip
+#     pixelated_mods.addon32 + the six data files + README + INSTALL.
+#     Users drop the contents into their existing ReShade add-on
+#     install next to PsoBB.exe. ~275 KB.
+#
+# The addon build uses MSVC x86 (same toolchain build.bat uses locally).
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Override version string (e.g. v0.1.0-rc1). Leave blank to use the commit short SHA.'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: windows-2022
+    permissions:
+      contents: write  # needed to create a release on tag push
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version string
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            ver="${GITHUB_REF#refs/tags/}"
+          elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
+            ver="${{ github.event.inputs.tag }}"
+          else
+            ver="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=${ver}" >> "${GITHUB_OUTPUT}"
+          echo "Building version: ${ver}"
+
+      # --- pixelated_mods.addon32 (MSVC x86) --------------------------------
+
+      - name: Configure MSVC x86 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: Configure addon (CMake, Ninja, Release)
+        shell: cmd
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build
+
+      - name: Build addon
+        shell: cmd
+        run: |
+          cmake --build build --config Release
+
+      - name: Verify addon output
+        shell: bash
+        run: |
+          ls -la build/pixelated_mods.addon32
+          test -f build/pixelated_mods.addon32
+
+      # --- Stage release payload --------------------------------------------
+
+      - name: Stage release payload
+        shell: bash
+        run: |
+          stage="stage"
+          mkdir -p "$stage"
+          cp build/pixelated_mods.addon32             "$stage/"
+          cp pixelated_mods_items.txt                 "$stage/"
+          cp pixelated_mods_techs.txt                 "$stage/"
+          cp pixelated_mods_specials.txt              "$stage/"
+          cp pixelated_mods_rares.txt                 "$stage/"
+          cp pixelated_mods_hidden.txt                "$stage/"
+          cp pixelated_mods_monster_hidden.txt        "$stage/"
+          cp README.md                                "$stage/"
+          cp INSTALL.txt                              "$stage/"
+          cp LICENSE                                  "$stage/"
+          ls -la "$stage/"
+
+      # --- Package zip ------------------------------------------------------
+
+      - name: Package zip
+        shell: bash
+        run: |
+          ver="${{ steps.version.outputs.version }}"
+          zip="pixelateds-psobb-mods-${ver}.zip"
+          (cd stage && 7z a -tzip "../${zip}" . >/dev/null)
+          echo "zip=${zip}" >> "${GITHUB_ENV}"
+          ls -la "${zip}"
+
+      - name: Upload workflow artifacts (non-release runs)
+        if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixelateds-psobb-mods-${{ steps.version.outputs.version }}
+          path: ${{ env.zip }}
+          if-no-files-found: error
+
+      - name: Create GitHub Release (tag push only)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.zip }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
+          generate_release_notes: true

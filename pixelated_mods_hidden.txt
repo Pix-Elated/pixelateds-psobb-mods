@@ -1,0 +1,244 @@
+# pixelated_mods_hidden.txt
+#
+# List of 24-bit item IDs that should NEVER appear in the floor items
+# panel, regardless of filter mode. Equivalent to setting an item's
+# show flag to `false` in solylib's items_list.lua.
+#
+# Format: one entry per line, either a bare 6-hex-digit ID or an ID
+# followed by a space and a name comment. Lines starting with # or ;
+# are ignored. Same format as pixelated_mods_rares.txt.
+#
+# Rares are NEVER hidden, even if you list them here — pulsing red
+# rare drops always surface so you don't accidentally walk past one.
+# This means the entries below for common item base IDs do not hide
+# the rare variants with different IDs (DB's Saber, Club of Laconium,
+# Sacred Guard, etc.) — those live in pixelated_mods_rares.txt and always
+# pass through the filter.
+#
+# STAT-BASED OVERRIDES: in addition to the rare bypass, the add-on
+# checks stats on each hidden item and re-shows items with notable
+# rolls. A plain Hard Shield is hidden; a Hard Shield [+20 DFP +15
+# EVP] still shows. A plain Saber is hidden; a Saber +8 with 50 hit
+# still shows. Thresholds are hardcoded in ShouldShowItem and match
+# what a knowledgeable PSOBB player would consider "worth picking
+# up even from a trash-tier item".
+#
+# Goal: surface items most players want to collect. Hide the common
+# grind-filler drops. Add IDs to this file as you encounter items
+# you never want to see, save, and either reload the add-on or
+# restart PSO to pick up changes.
+
+# ============================================================================
+# WEAPONS — base tier of each class (non-rare first ~5 of every class)
+# ============================================================================
+# Rare variants (DB's Saber, Durandal, Red Handgun, etc.) are in
+# pixelated_mods_rares.txt and always show. Stat-based override shows any
+# of these with grinder >= 4, a non-zero special, or attribute >= 30.
+
+# Saber class (swords, 1-handed)
+000100 Saber
+000101 Brand
+000102 Buster
+000103 Pallasch
+000104 Gladius
+
+# Sword class (2-handed large)
+000200 Sword
+000201 Gigush
+000202 Breaker
+000203 Claymore
+000204 Calibur
+
+# Dagger class
+000300 Dagger
+000301 Knife
+000302 Blade
+000303 Edge
+000304 Ripper
+
+# Partisan class
+000400 Partisan
+000401 Halbert
+000402 Glaive
+000403 Berdys
+
+# Slicer class
+000500 Slicer
+000501 Spinner
+000502 Cutter
+000503 Sawcer
+000504 Diska
+
+# Handgun class
+000600 Handgun
+000601 Autogun
+000602 Lockgun
+000603 Railgun
+000604 Raygun
+
+# Rifle class
+000700 Rifle
+000701 Sniper
+000702 Blaster
+000703 Beam
+000704 Laser
+
+# Mechgun class
+000800 Mechgun
+000801 Assault
+000802 Repeater
+000803 Gatling
+000804 Vulcan
+
+# Shot class
+000900 Shot
+000901 Spread
+000902 Cannon
+000903 Launcher
+000904 Arms
+
+# Cane / Club class
+000A00 Cane
+000A01 Stick
+000A02 Mace
+000A03 Club
+
+# Rod class
+000B00 Rod
+000B01 Pole
+000B02 Pillar
+000B03 Striker
+
+# Wand class
+000C00 Wand
+000C01 Staff
+000C02 Baton
+000C03 Scepter
+
+# ============================================================================
+# ARMOR (frames) — base tier through General Armor
+# ============================================================================
+# Stat-based override: slots >= 2, DFP bonus >= 15, or EVP bonus >= 10
+# will re-show a hidden armor. Guardian Armor onward are kept visible
+# because they start being mid-to-late game upgrades.
+
+010100 Frame
+010101 Armor
+010102 Psy Armor
+010103 Giga Frame
+010104 Soul Frame
+010105 Cross Armor
+010106 Solid Frame
+010107 Brave Armor
+010108 Hyper Frame
+010109 Grand Armor
+01010A Shock Frame
+01010B King's Frame
+01010C Dragon Frame
+01010D Absorb Armor
+01010E Protect Frame
+01010F General Armor
+
+# ============================================================================
+# SHIELDS — base tier through Guardian Shield
+# ============================================================================
+# Stat-based override: DFP bonus >= 15 or EVP bonus >= 10 re-shows
+# a hidden shield. Divinity Barrier and later tiers are kept visible.
+
+010200 Barrier
+010201 Shield
+010202 Core Shield
+010203 Giga Shield
+010204 Soul Barrier
+010205 Hard Shield
+010206 Brave Barrier
+010207 Solid Shield
+010208 Flame Barrier
+010209 Plasma Barrier
+01020A Freeze Barrier
+01020B Psychic Barrier
+01020C General Shield
+01020D Protect Barrier
+01020E Glorious Shield
+01020F Imperial Barrier
+010210 Guardian Shield
+
+# ============================================================================
+# UNITS — low-tier stat units
+# ============================================================================
+# Each stat has four tiers: the first three are common trash, God/*
+# (the fourth) is kept because it's mid-to-late-game worth keeping.
+
+# Power
+010300 Knight/Power
+010301 General/Power
+010302 Ogre/Power
+# Mind
+010304 Priest/Mind
+010305 General/Mind
+010306 Angel/Mind
+# Arm
+010308 Marksman/Arm
+010309 General/Arm
+01030A Elf/Arm
+# Legs
+01030C Thief/Legs
+01030D General/Legs
+01030E Elf/Legs
+# HP
+010310 Digger/HP
+010311 General/HP
+010312 Dragon/HP
+# TP
+010314 Magician/TP
+010315 General/TP
+010316 Angel/TP
+# Body
+010318 Warrior/Body
+010319 General/Body
+01031A Metal/Body
+# Luck
+01031C Angel/Luck
+# Ability (Master and Hero are common junk; God/Ability is kept)
+01031E Master/Ability
+01031F Hero/Ability
+
+# ============================================================================
+# ELEMENTAL RESIST UNITS
+# ============================================================================
+# Single-element resists are near-universally junk. All/Resist,
+# Super/Resist, and Perfect/Resist are NOT in this list because they're
+# tiered up and sometimes wanted.
+010321 Resist/Fire
+010322 Resist/Flame
+010323 Resist/Burning
+010324 Resist/Cold
+010325 Resist/Freeze
+010326 Resist/Blizzard
+010327 Resist/Shock
+010328 Resist/Thunder
+010329 Resist/Storm
+01032A Resist/Light
+01032B Resist/Saint
+01032C Resist/Holy
+01032D Resist/Dark
+01032E Resist/Evil
+01032F Resist/Devil
+
+# ============================================================================
+# REGEN / CURE UNITS — low-tier
+# ============================================================================
+# HP/Restorate, TP/Restorate = lowest regen tier, trash. The Generate
+# and Revival tiers are kept visible.
+010333 HP/Restorate
+010336 TP/Restorate
+
+# Cure/* status-resistance units are situational at best. Most
+# players never use them. Hide by default; stat-based override
+# never fires for these since they have no stat rolls.
+010342 Cure/Poison
+010343 Cure/Paralysis
+010344 Cure/Slow
+010345 Cure/Confuse
+010346 Cure/Freeze
+010347 Cure/Shock

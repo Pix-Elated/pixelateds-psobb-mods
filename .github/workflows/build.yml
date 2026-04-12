@@ -1,0 +1,40 @@
+# Continuous integration build. Fires on every push to main and every
+# pull request. Builds the addon (MSVC x86) — same toolchain build.bat
+# and the release workflow use — but doesn't package or publish
+# anything. Purely a regression signal.
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC x86 environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      - name: Configure addon (CMake, Ninja, Release)
+        shell: cmd
+        run: |
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build
+
+      - name: Build addon
+        shell: cmd
+        run: |
+          cmake --build build --config Release
+
+      - name: Verify addon output
+        shell: bash
+        run: |
+          ls -la build/pixelated_mods.addon32
+          test -f build/pixelated_mods.addon32

@@ -1,0 +1,40 @@
+# CMake / ninja build tree
+/build/
+/build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+build.ninja
+compile_commands.json
+.ninja_deps
+.ninja_log
+
+# Compiled artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.addon32
+*.exe
+*.exp
+*.pdb
+*.dbg
+*.ilk
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Runtime files the add-on writes next to itself at the deploy location
+pixelated_mods.ini
+pixelated_mods.log
+
+# Temporary test dirs from earlier toolchain debugging
+tmptest/

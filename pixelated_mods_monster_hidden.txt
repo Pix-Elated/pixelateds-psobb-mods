@@ -1,0 +1,44 @@
+# pixelated_mods_monster_hidden.txt
+#
+# List of PSO unitxt_ids that should be hidden from the monster HP
+# panel. Same file format as pixelated_mods_rares.txt: one entry per line,
+# either a bare decimal / hex ID or an ID followed by a space and a
+# name comment. Lines starting with # or ; are ignored.
+#
+# Use case: some boss sub-entities and decorative hitboxes have
+# NON-ZERO unitxt_ids that still show up as "Unknown" (or some
+# other unhelpful name) in the HP panel. Listing those IDs here
+# hides them.
+#
+# Known structural cases that are ALREADY handled by the addon and
+# do NOT need to be listed here:
+#
+#   - unitxt_id == 0 (PSO's "no identity assigned" placeholder slot,
+#     used by Olga Flow's anchor hitbox and other unnamed sub-
+#     entities). These are dropped by a hardcoded check in
+#     GetAliveMonsters — they're structurally broken entities the
+#     game itself never intended to label.
+#   - Stale corpses after cutscenes that persist in a different
+#     room than the player (handled by the room-match filter).
+#   - Monsters with the 0x0800 "dead" flag set (handled by the
+#     entity-flags filter).
+#
+# So this file should only grow when you find a LEGITIMATELY
+# unwanted entity with a valid non-zero unitxt_id. To capture the
+# ID, watch pixelated_mods.log for lines like:
+#
+#   GetAliveMonsters: unnamed monster unitxt_id=NNN name='Unknown' \
+#       hp=X/Y flags=0x0000 room=R addr=0x...
+#
+# Copy the unitxt_id into this file, save, reload the addon (or
+# restart PSO). The entity will no longer appear in the HP panel.
+#
+# Note: the loader rejects id=0 lines (they can't be distinguished
+# from parse failures), so you can't use this file to filter
+# unitxt_id=0. That's what the hardcoded structural filter above
+# is for.
+#
+# Examples (commented out):
+#
+#   123    Some boss shell hitbox (example, not real)
+#   0x45   Another hypothetical sub-entity (example, not real)

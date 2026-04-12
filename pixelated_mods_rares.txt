@@ -1,0 +1,461 @@
+# Pixelated's PSOBB Mods — rare item ID list
+#
+# Items listed here will pulse red in the floor items overlay when the
+# "Pulse rare items (red blink)" checkbox is enabled. One item ID per
+# line in 6-digit uppercase hex, followed by a space and the item name
+# (the name is ignored by the parser — it's just there for your sanity
+# when editing this file).
+#
+# Lines starting with '#' are comments. Blank lines are ignored.
+#
+# This list targets PSOBB Blue Burst red-box drops on Ephinea. It is
+# meant to surface every item whose drop is considered "rare" enough
+# to pulse in the floor overlay — i.e. items that land in a red item
+# box rather than a standard gray/brown crate. Normal-tier family
+# progressions (Brand, Buster, Pallasch, Gladius; Gigush, Breaker,
+# Calibur; Berdys, Gungnir; etc.) are deliberately excluded even
+# though they have unique names, because they drop from common drop
+# tables.
+#
+# Photon drops / spheres / crystals, mag cells, and Add Slot are
+# already flagged as rare by the built-in sub-type check, so they
+# don't need to be listed here.
+#
+# =============================================================================
+# Weapons (type 0x00)
+# =============================================================================
+
+# Sabers
+000105 DB's Saber
+000106 Kaladbolg
+000107 Durandal
+000108 Galatine
+
+# Swords
+000205 Flowen's Sword
+000206 Last Survivor
+000207 Dragon Slayer
+
+# Daggers
+000306 Bloody Art
+000307 Cross Scar
+000308 Zero Divide
+000309 Two Kamui
+
+# Partisans
+000405 Brionac
+000406 Vjaya
+000407 Gae Bolg
+000408 Asteron Belt
+
+# Slicers
+000505 Slicer of Assassin
+000506 Diska of Liberator
+000507 Diska of Braveman
+000508 Izmaela
+
+# Handguns
+000606 Custom Ray ver.OO
+000607 Bravace
+000608 Tension Blaster
+
+# Rifles
+000705 Visk-235W
+000706 Wals-MK2
+000707 Justy-23ST
+000708 Rianov 303SNR
+000709 Rianov 303SNR-1
+00070A Rianov 303SNR-2
+00070B Rianov 303SNR-3
+00070C Rianov 303SNR-4
+00070D Rianov 303SNR-5
+
+# Mechguns
+000805 M&A60 Vise
+000806 H&S25 Justice
+000807 L&K14 Combat
+
+# Shots
+000905 Crush Bullet
+000906 Meteor Smash
+000907 Final Impact
+
+# Canes
+000A04 Club of Laconium
+000A05 Mace of Adaman
+000A06 Club of Zumiuran
+000A07 Lollipop
+
+# Rods
+000B04 Battle Verge
+000B05 Brave Hammer
+000B06 Alive Aqhu
+000B07 Valkyrie
+
+# Wands
+000C04 Fire Scepter: Agni
+000C05 Ice Staff: Dagon
+000C06 Storm Wand: Indra
+000C07 Earth Wand: Brownie
+
+# Claws
+000D00 Photon Claw
+000D01 Silence Claw
+000D02 Nei's Claw
+000D03 Phoenix Claw
+
+# Double Sabers (twin)
+000E01 Stag Cutlery
+000E02 Twin Brand
+
+# Knuckles
+000F00 Brave Knuckle
+000F01 Angry Fist
+000F02 God Hand
+000F03 Sonic Knuckle
+000F04 Star Song
+
+# Katanas
+001000 Orotiagito
+001001 Agito (1975)
+001002 Agito (1983)
+001003 Agito (2001)
+001004 Agito (1991)
+001005 Agito (2008)
+001006 Agito Auspicious
+001007 Raikiri
+
+# =============================================================================
+# Unique rares (one weapon per family slot, 001100 onwards)
+# =============================================================================
+
+# Rare swords
+001100 Soul Eater
+001101 Soul Banish
+
+# Rare guns
+001200 Spread Needle
+001300 Holy Ray
+001400 Inferno Bazooka
+001401 Rambling May
+001402 L&K38 Combat
+001500 Flame Visit
+001501 Burning Visit
+
+# Event / joke rares
+001600 Akiko's Frying Pan
+001700 Sorcerer's Cane
+
+# Enemy-themed rares
+001800 S-Beat's Blade
+001900 P-Arms' Blade
+001A00 Delsaber's Buster
+001B00 Bringer's Rifle
+
+# Unique rares (continued)
+001C00 Egg Blaster
+001D00 Psycho Wand
+001E00 Heaven Punisher
+001F00 Lavis Cannon
+002000 Victor Axe
+002001 Laconium Axe
+002100 Chain Sawd
+002200 Caduceus
+002201 Mercurius Rod
+002300 Sting Tip
+002400 Magical Piece
+002500 Technical Crozier
+002600 Suppressed Gun
+002700 Ancient Saber
+002800 Harisen Battle Fan
+002900 Yamigarasu
+002A00 Akiko's Wok
+002B00 Toy Hammer
+002C00 Elysion
+002D00 Red Saber
+002E00 Meteor Cudgel
+002F00 Monkey King Bar
+002F01 Black King Bar
+003000 Double Cannon
+003001 Girasole
+003100 Huge Battle Fan
+003200 Tsumikiri J-Sword
+003300 Sealed J-Sword
+003400 Red Sword
+003500 Crazy Tune
+003600 Twin Chakram
+003700 Wok of Akiko's Shop
+003800 Lavis Blade
+003900 Red Dagger
+003A00 Madam's Parasol
+003B00 Madam's Umbrella
+003C00 Imperial Pick
+003D00 Berdysh
+003E00 Red Partisan
+003F00 Flight Cutter
+004000 Flight Fan
+004100 Red Slicer
+004200 Handgun: Guld
+004201 Master Raven
+004300 Handgun: Milla
+004301 Last Swan
+004400 Red Handgun
+004500 Frozen Shooter
+004501 Snow Queen
+004600 Anti Android Rifle
+004700 Rocket Punch
+004800 Samba Maracas
+004900 Twin Psychogun
+004A00 Drill Launcher
+004B00 Guld Milla
+004B01 Dual Bird
+004C00 Red Mechgun
+004D00 Belra Cannon
+004E00 Panzer Faust
+004E01 Iron Faust
+004F00 Summit Moon
+005000 Windmill
+005100 Evil Curst
+005200 Flower Cane
+005300 Hildebear's Cane
+005400 Hildeblue's Cane
+005500 Rabbit Wand
+005600 Plantain Leaf
+005601 Fatsia
+005700 Demonic Fork
+005800 Striker of Chao
+005900 Broom
+005A00 Prophets of Motav
+005B00 The Sigh of a God
+005C00 Twinkle Star
+005D00 Plantain Fan
+005E00 Twin Blaze
+005F00 Marina's Bag
+006000 Dragon's Claw
+006100 Panther's Claw
+006200 S-Red's Blade
+006300 Plantain Huge Fan
+006400 Chameleon Scythe
+006500 Yasminkov 3000R
+006600 Ano Rifle
+006700 Baranz Launcher
+006800 Branch of Pakupaku
+006900 Heart of Poumn
+006A00 Yasminkov 2000H
+006B00 Yasminkov 7000V
+006C00 Yasminkov 9000M
+006D00 Maser Beam
+006D01 Power Maser
+006E00 Game Magazine
+006E01 LOGiN
+006F00 Flower Bouquet
+
+# Enemy-drop themed rares (008900+)
+008900 Musashi
+008901 Yamato
+008902 Asuka
+008903 Sange & Yasha
+008A00 Sange
+008A01 Yasha
+008A02 Kamui
+008B00 Photon Launcher
+008B01 Guilty Light
+008B02 Red Scorpio
+008B03 Phonon Maser
+008C00 Talis
+008C01 Mahu
+008C02 Hitogata
+008C03 Dancing Hitogata
+008C04 Kunai
+008D00 Nug2000-Bazooka
+008E00 S-Berill's Hands #0
+008E01 S-Berill's Hands #1
+
+# Event / mission rares (009100+)
+009100 Gi Gue Bazooka
+009200 Guardianna
+009300 Viridia Card
+009301 Greenill Card
+009302 Skyly Card
+009303 Bluefull Card
+009304 Purplenum Card
+009305 Pinkal Card
+009306 Redria Card
+009307 Oran Card
+009308 Yellowboze Card
+009309 Whitill Card
+009400 Morning Glory
+009500 Partisan of Lightning
+009600 Gal Wind
+009700 Zanba
+009800 Rika's Claw
+009900 Angel Harp
+009A00 Demolition Comet
+009B00 Nei's Claw
+009C00 Rainbow Baton
+009D00 Dark Flow
+009E00 Dark Meteor
+009F00 Dark Bridge
+00A000 G-Assassin's Sabers
+00A100 Rappy's Fan
+00A200 Booma's Claw
+00A201 Gobooma's Claw
+00A202 Gigobooma's Claw
+00A300 Ruby Bullet
+00A400 Amore Rose
+
+# Episode 4 / late-Ep2 rares (00AA00+)
+00AA00 Slicer of Fanatic
+00AB00 Lame d'Argent
+00AC00 Excalibur
+00AD00 Rage de Feu
+00AE00 Daisy Chain
+00AF00 Ophelie Seize
+00B000 Mille Marteaux
+00B100 Le Cogneur
+00B200 Commander Blade
+00B300 Vivienne
+00B400 Kusanagi
+00B500 Sacred Duster
+00B600 Guren
+00B700 Shouren
+00B800 Jizai
+00B900 Flamberge
+00BA00 Yunchang
+00BB00 Snake Spire
+00BC00 Flapjack Flapper
+00BD00 Getsugasan
+00BE00 Maguwa
+00BF00 Heaven Striker
+00C000 Cannon Rouge
+00C100 Meteor Rouge
+00C200 Solferino
+00C300 Clio
+00C400 Siren Glass Hammer
+00C500 Glide Divine
+00C600 Shichishito
+00C700 Murasame
+00C800 Daylight Scar
+00C900 Decalog
+00CA00 5th Anniv. Blade
+00CB00 Tyrell's Parasol
+00CC00 Akiko's Cleaver
+00CD00 Tanegashima
+00CE00 Tree Clippers
+00CF00 Nice Shot
+
+# =============================================================================
+# Armor (type 0x01, sub 0x01)
+# =============================================================================
+
+01011B Revival Garment
+01011C Spirit Garment
+01011D Stink Frame
+010129 Guard Wave
+01012B Luminous Field
+010134 Smoking Plate
+01013D Kroe's Sweater
+010141 Thirteen
+010142 Mother Garb
+010143 Mother Garb+
+010144 Dress Plate
+010149 Cursed Cloak
+
+# =============================================================================
+# Shields (type 0x01, sub 0x02)
+# =============================================================================
+
+010216 Sacred Guard
+010217 S-Parts ver1.16
+010218 S-Parts ver2.01
+010219 Light Relief
+010220 Combat Gear
+010221 Proto Regene Gear
+010222 Regenerate Gear
+010223 Regene Gear Adv.
+010224 Flowen's Shield
+010225 Custom Barrier ver.OO
+010226 DB's Shield
+010227 Red Ring
+010228 Tripolic Shield
+010229 Standstill Shield
+010230 Hunter's Shell
+010231 Rico's Glasses
+010232 Rico's Earring
+010233 Blue Ring
+01022B Kasami Bracer
+010241 Red Merge
+010252 Ragol Ring
+010273 Anti-Dark Ring
+010285 Gratia
+010286 Tripolic Reflector
+010287 Striker Plus
+010288 Regenerate Gear B.P.
+010289 Rupika
+010290 From the Depths
+010291 De Rol Le Shield
+010292 Honeycomb Reflector
+010293 Epsiguard
+010294 Angel Ring
+010295 Union Guard
+01028A Yata Mirror
+
+# =============================================================================
+# Units (type 0x01, sub 0x03)
+# =============================================================================
+
+# God/* — top-tier stat units, all rare
+010303 God/Power
+010307 God/Mind
+01030B God/Arm
+01030F God/Legs
+010313 God/HP
+010317 God/TP
+01031B God/Body
+01031D God/Luck
+010320 God/Ability
+
+# Regenerate / Restorate / Revival
+010333 HP/Restorate
+010334 HP/Generate
+010335 HP/Revival
+010336 TP/Restorate
+010337 TP/Generate
+010338 TP/Revival
+010339 PB/Amplifier
+01033A PB/Generate
+01033B PB/Create
+010363 PB/Increase
+
+# Cure/* — status resistance
+010342 Cure/Poison
+010343 Cure/Paralysis
+010344 Cure/Slow
+010345 Cure/Confuse
+010346 Cure/Freeze
+010347 Cure/Shock
+
+# Miscellaneous endgame units
+01032F Resist/Devil
+010349 V101
+01034C V801
+010351 Smartlink
+01035B Centurion/Ability
+
+# Heavenly/* — Ephinea endgame units
+010353 Heavenly/Battle
+010354 Heavenly/Power
+010355 Heavenly/Mind
+010356 Heavenly/Arms
+010357 Heavenly/Legs
+010358 Heavenly/Body
+010359 Heavenly/Luck
+01035A Heavenly/Ability
+01035D Heavenly/HP
+01035E Heavenly/TP
+01035F Heavenly/Resist
+010360 Heavenly/Technique
+
+# God/Battle + God/Technique
+01033E God/Technique
+010341 God/Battle
