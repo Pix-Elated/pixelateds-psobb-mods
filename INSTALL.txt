@@ -1,0 +1,68 @@
+Pixelated's PSOBB Mods — install instructions
+==============================================
+
+This is a ReShade add-on for Phantasy Star Online Blue Burst. It runs
+as a .addon32 loaded by ReShade at game startup, so you need ReShade
+installed against your PsoBB.exe first. If you can't get ReShade to
+hook the game, nothing in this zip will run — sort that out before
+you do anything else.
+
+Prerequisites
+-------------
+1. A working PSOBB install. The addon has only been tested on
+   Ephinea. It SHOULD work on Schthack, Ragol, and vanilla PSOBB
+   (same Sega base binary, same offsets, same sigscan patterns),
+   but that's unverified — nobody has run it on a non-Ephinea fork
+   yet. File an issue if you try it.
+2. ReShade 6.7.3 or newer, "with full add-on support", from:
+       https://reshade.me
+   Install it against your PsoBB.exe with whichever API your game is
+   actually running under. For most PSOBB setups (Ephinea's default,
+   anything using d3d8to9, dgVoodoo, or DXVK's dxvk_d3d9.dll) that's
+   Direct3D 9. If you're running something unusual you already know
+   what API to pick.
+
+Install
+-------
+Drop these files next to PsoBB.exe — the same directory where you
+installed ReShade:
+
+    pixelated_mods.addon32
+    pixelated_mods_rares.txt
+    pixelated_mods_hidden.txt
+    pixelated_mods_monster_hidden.txt
+
+Item names, technique names, and weapon special names are read from
+the game's own data tables at runtime, so there are no _items.txt /
+_techs.txt / _specials.txt files to ship any more.
+
+That's it. No installer, no registry writes, no elevated privileges.
+
+Verify
+------
+1. Launch PSOBB normally (via your launcher — online.exe, PsoBB.exe,
+   whatever your server uses).
+2. Press Home. ReShade's overlay opens.
+3. Open the "Add-ons" tab. You should see "Pixelated's PSOBB Mods"
+   listed. If it's there, the addon loaded.
+4. The mod's own windows (HUD overlay, floor item list, etc.) toggle
+   from inside the addon's panel.
+
+Uninstall
+---------
+Delete the seven files listed above from your PSOBB directory. ReShade
+will boot next launch with no add-on. Removing ReShade itself is a
+separate job — use ReShade's own setup to undo that.
+
+Per-server notes
+----------------
+Ephinea PSOBB
+    Default install path: %USERPROFILE%\EphineaPSO\
+    Ephinea's launcher (online.exe) writes renderer config into the
+    game dir. "Direct3D 9" in the launcher's Options page is what
+    ReShade should hook.
+
+Schthack / Ragol / vanilla Blue Burst
+    Install path is wherever you extracted the server's client zip.
+    PsoBB.exe is in the root of that directory — drop the addon files
+    next to it.
