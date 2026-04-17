@@ -3081,11 +3081,11 @@ bool g_stick_zoom_enabled    = true;   // Y axis → mouse wheel
 bool g_stick_invert_y        = false;  // true = flip zoom direction
 int  g_stick_deadzone        = 8000;
 int  g_stick_rate_ms         = 250;
-// X-axis is user-bindable. Each field holds a hardware scancode that
-// the right stick fires via SendInput on left/right push (after the
-// axis-dominance + deadzone + rate-limit gates). 0 = unbound.
-int  g_stick_left_scancode   = 0;
-int  g_stick_right_scancode  = 0;
+// X-axis is hardcoded: left push sends PgDn, right push sends PgUp,
+// both routed through SendInput with KEYEVENTF_EXTENDEDKEY so Windows
+// doesn't confuse them with the NumPad digits that share the scan
+// codes. R3 (right thumb click) sends Esc. See controller_chords.cpp
+// PollRightStick for the send path.
 
 bool   g_chord_overlay_show_hints    = true;   // dim badges when no trigger held
 int    g_chord_overlay_flash_ms      = 220;    // flash animation length
@@ -4364,41 +4364,10 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
             ImGui::TextDisabled(
                 "eats the injected events and stick zoom won't work.");
         }
-        ImGui::TextDisabled(
-            "Stick X -> key bindings (0 = unbound; hex scancode)");
-        // Hex input mode so what the user types matches the hint
-        // values below (0x49 for PgUp, etc.). Previously used decimal
-        // InputInt with hex-labeled hints, which read as a bug:
-        // typing "49" gave 'N' (decimal 49 = hex 0x31) instead of
-        // PgUp (hex 0x49 = decimal 73).
-        {
-            unsigned int lsc = static_cast<unsigned int>(g_stick_left_scancode);
-            if (ImGui::InputScalar("Left push scancode", ImGuiDataType_U32,
-                                   &lsc, nullptr, nullptr, "%02X",
-                                   ImGuiInputTextFlags_CharsHexadecimal))
-            {
-                if (lsc > 255u) lsc = 255u;
-                g_stick_left_scancode = static_cast<int>(lsc);
-                g_config_dirty = true;
-            }
-            unsigned int rsc = static_cast<unsigned int>(g_stick_right_scancode);
-            if (ImGui::InputScalar("Right push scancode", ImGuiDataType_U32,
-                                   &rsc, nullptr, nullptr, "%02X",
-                                   ImGuiInputTextFlags_CharsHexadecimal))
-            {
-                if (rsc > 255u) rsc = 255u;
-                g_stick_right_scancode = static_cast<int>(rsc);
-                g_config_dirty = true;
-            }
-        }
-        if (g_stick_left_scancode  < 0) g_stick_left_scancode  = 0;
-        if (g_stick_right_scancode < 0) g_stick_right_scancode = 0;
-        if (g_stick_left_scancode  > 255) g_stick_left_scancode  = 255;
-        if (g_stick_right_scancode > 255) g_stick_right_scancode = 255;
-        ImGui::TextDisabled(
-            "Hex hardware scancode. Common: Esc=01, Tab=0F, Q=10, E=12,");
-        ImGui::TextDisabled(
-            "R=13, F=21, PgUp=49, PgDn=51, Home=47, End=4F, Up=48, Down=50.");
+        ImGui::TextDisabled("Right stick X axis (hardcoded):");
+        ImGui::TextDisabled("  push left  -> PgDn");
+        ImGui::TextDisabled("  push right -> PgUp");
+        ImGui::TextDisabled("R3 (stick press) -> Esc");
         DIRTY_IF(ImGui::SliderInt(
             "Deadzone",
             &g_stick_deadzone, 0, 20000));
@@ -5710,8 +5679,6 @@ extern "C" bool StickMap_ZoomEnabled()     { return g_stick_zoom_enabled; }
 extern "C" bool StickMap_InvertY()         { return g_stick_invert_y; }
 extern "C" int  StickMap_Deadzone()        { return g_stick_deadzone; }
 extern "C" int  StickMap_RateMs()          { return g_stick_rate_ms; }
-extern "C" int  StickMap_LeftScancode()    { return g_stick_left_scancode; }
-extern "C" int  StickMap_RightScancode()   { return g_stick_right_scancode; }
 
 // ============================================================================
 // Mouse-wheel rate limiter (defined at file scope, not in the anonymous
@@ -6023,8 +5990,9 @@ static void LoadConfig()
         else if (std::strcmp(key, "stick_invert_y")              == 0) g_stick_invert_y              = std::atoi(val) != 0;
         else if (std::strcmp(key, "stick_deadzone")              == 0) g_stick_deadzone              = std::atoi(val);
         else if (std::strcmp(key, "stick_rate_ms")               == 0) g_stick_rate_ms               = std::atoi(val);
-        else if (std::strcmp(key, "stick_left_scancode")         == 0) g_stick_left_scancode         = std::atoi(val);
-        else if (std::strcmp(key, "stick_right_scancode")        == 0) g_stick_right_scancode        = std::atoi(val);
+        // stick_left_scancode / stick_right_scancode were removed in
+        // v1.1.1 when the right stick X mapping became hardcoded
+        // (PgDn/PgUp). Old INIs with these keys are silently ignored.
         else if (std::strcmp(key, "vignette_enabled")            == 0) g_vignette_enabled            = std::atoi(val) != 0;
         else if (std::strcmp(key, "vignette_low_hp")             == 0) g_vignette_low_hp             = std::atoi(val) != 0;
         else if (std::strcmp(key, "vignette_poison")             == 0) g_vignette_poison             = std::atoi(val) != 0;
@@ -6181,8 +6149,6 @@ static void SaveConfig()
     std::fprintf(f, "stick_invert_y=%d\n",               g_stick_invert_y ? 1 : 0);
     std::fprintf(f, "stick_deadzone=%d\n",               g_stick_deadzone);
     std::fprintf(f, "stick_rate_ms=%d\n",                g_stick_rate_ms);
-    std::fprintf(f, "stick_left_scancode=%d\n",          g_stick_left_scancode);
-    std::fprintf(f, "stick_right_scancode=%d\n",         g_stick_right_scancode);
     std::fprintf(f, "vignette_enabled=%d\n",             g_vignette_enabled ? 1 : 0);
     std::fprintf(f, "vignette_low_hp=%d\n",              g_vignette_low_hp ? 1 : 0);
     std::fprintf(f, "vignette_poison=%d\n",              g_vignette_poison ? 1 : 0);

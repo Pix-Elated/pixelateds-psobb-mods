@@ -261,8 +261,6 @@ extern "C" bool StickMap_ZoomEnabled();
 extern "C" bool StickMap_InvertY();
 extern "C" int  StickMap_Deadzone();
 extern "C" int  StickMap_RateMs();
-extern "C" int  StickMap_LeftScancode();
-extern "C" int  StickMap_RightScancode();
 
 // Debug log counter. Bounded to kMaxDebugLogLines so the log file
 // doesn't flood during a long test session.
@@ -299,6 +297,8 @@ static uint8_t s_prev_face[4] = {0, 0, 0, 0};
 // intentionally NOT suppressed because it's the in-game camera control.
 constexpr WORD XBTN_LB = 0x0100;
 constexpr WORD XBTN_RB = 0x0200;
+constexpr WORD XBTN_L3 = 0x0040;   // left thumb click
+constexpr WORD XBTN_R3 = 0x0080;   // right thumb click
 
 // ---------- Hook typedefs ----------
 
@@ -474,21 +474,27 @@ static void SendWheelTap(int delta)
 }
 
 // Fire a single scancode (down + up) via SendInput. Used by the
-// right-stick X-axis mapping to send whichever key the user has
-// configured for left/right pushes. No deferred key-up: stick
-// events are already rate-limited and each push is a discrete
-// short tap, so down+up in a single SendInput call is fine.
-static void SendScancodeSimple(uint8_t scancode)
+// right-stick X-axis mapping. `extended` must be true for keys in
+// the nav cluster (PgUp/PgDn/Home/End/Arrows/Ins/Del) — they share
+// scan codes with the numpad digits and Windows disambiguates them
+// via the extended-key flag. Without it, PgUp (0x49) is interpreted
+// as NumPad9 and types "9" instead of paging. No deferred key-up:
+// stick events are rate-limited and each push is a discrete short
+// tap, so down+up in a single SendInput call is fine.
+static void SendScancodeSimple(uint8_t scancode, bool extended)
 {
     if (scancode == 0) return;
+
+    DWORD flags = KEYEVENTF_SCANCODE;
+    if (extended) flags |= KEYEVENTF_EXTENDEDKEY;
 
     INPUT events[2] = {};
     events[0].type       = INPUT_KEYBOARD;
     events[0].ki.wScan   = scancode;
-    events[0].ki.dwFlags = KEYEVENTF_SCANCODE;
+    events[0].ki.dwFlags = flags;
     events[1].type       = INPUT_KEYBOARD;
     events[1].ki.wScan   = scancode;
-    events[1].ki.dwFlags = KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP;
+    events[1].ki.dwFlags = flags | KEYEVENTF_KEYUP;
 
     const UINT sent = SendInput(2, events, sizeof(INPUT));
     s_stat_sendinput_calls.fetch_add(1, std::memory_order_relaxed);
@@ -698,6 +704,17 @@ static void DetectAndFireChord(const DIJOYSTATE2 *js_or_null)
 // one axis while the other is idle.
 static DWORD s_stick_last_y_tick = 0;
 static DWORD s_stick_last_x_tick = 0;
+// Edge-tracker for R3 (right thumb click). Fires Esc once per press;
+// the user must release and re-click to fire again.
+static bool  s_r3_was_down = false;
+
+// DirectInput Set 1 hardware scan codes.
+//   0x01 Escape     — plain key, no extended flag
+//   0x49 PgUp       — shares scan with NumPad9, needs KEYEVENTF_EXTENDEDKEY
+//   0x51 PgDn       — shares scan with NumPad3, needs KEYEVENTF_EXTENDEDKEY
+constexpr uint8_t kScanEsc  = 0x01;
+constexpr uint8_t kScanPgUp = 0x49;
+constexpr uint8_t kScanPgDn = 0x51;
 
 // Read the XInput right stick (requires s_last_xinput populated by
 // PollXInput earlier in the frame) and synthesize wheel / tab events
@@ -744,13 +761,23 @@ static void PollRightStick()
     }
     else if (x_dominates && ax >= deadzone)
     {
-        const int scancode = (rx > 0) ? StickMap_RightScancode()
-                                      : StickMap_LeftScancode();
-        if (scancode != 0 && now - s_stick_last_x_tick >= rate)
+        // Hardcoded nav binding: right push = PgUp, left push = PgDn.
+        // Both are "extended" keys on PS/2 Set 1 — without the flag,
+        // Windows routes scan 0x49 to NumPad9 and 0x51 to NumPad3.
+        if (now - s_stick_last_x_tick >= rate)
         {
             s_stick_last_x_tick = now;
-            SendScancodeSimple(static_cast<uint8_t>(scancode));
+            const uint8_t scan = (rx > 0) ? kScanPgUp : kScanPgDn;
+            SendScancodeSimple(scan, /*extended=*/true);
         }
+    }
+
+    // R3 (right thumb click) → Esc, edge-triggered. One tap per press.
+    {
+        const bool r3_down = (s_last_xinput.Gamepad.wButtons & XBTN_R3) != 0;
+        if (r3_down && !s_r3_was_down)
+            SendScancodeSimple(kScanEsc, /*extended=*/false);
+        s_r3_was_down = r3_down;
     }
 }
 
