@@ -4379,7 +4379,9 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
         ImGui::TextDisabled("Right stick X axis (hardcoded):");
         ImGui::TextDisabled("  push left  -> PgDn");
         ImGui::TextDisabled("  push right -> PgUp");
-        ImGui::TextDisabled("R3 (stick press) -> Esc");
+        ImGui::TextDisabled("Thumb clicks (hardcoded):");
+        ImGui::TextDisabled("  L3 -> Enter (confirm)");
+        ImGui::TextDisabled("  R3 -> Esc (cancel)");
         DIRTY_IF(ImGui::SliderInt(
             "Deadzone",
             &g_stick_deadzone, 0, 20000));

@@ -707,14 +707,17 @@ static DWORD s_stick_last_x_tick = 0;
 // Edge-tracker for R3 (right thumb click). Fires Esc once per press;
 // the user must release and re-click to fire again.
 static bool  s_r3_was_down = false;
+static bool  s_l3_was_down = false;
 
 // DirectInput Set 1 hardware scan codes.
-//   0x01 Escape     — plain key, no extended flag
-//   0x49 PgUp       — shares scan with NumPad9, needs KEYEVENTF_EXTENDEDKEY
-//   0x51 PgDn       — shares scan with NumPad3, needs KEYEVENTF_EXTENDEDKEY
-constexpr uint8_t kScanEsc  = 0x01;
-constexpr uint8_t kScanPgUp = 0x49;
-constexpr uint8_t kScanPgDn = 0x51;
+//   0x01 Escape       — plain key, no extended flag
+//   0x1C Enter (main) — plain key; NumPad Enter is 0xE0 0x1C, different
+//   0x49 PgUp         — shares scan with NumPad9, needs KEYEVENTF_EXTENDEDKEY
+//   0x51 PgDn         — shares scan with NumPad3, needs KEYEVENTF_EXTENDEDKEY
+constexpr uint8_t kScanEsc   = 0x01;
+constexpr uint8_t kScanEnter = 0x1C;
+constexpr uint8_t kScanPgUp  = 0x49;
+constexpr uint8_t kScanPgDn  = 0x51;
 
 // Read the XInput right stick (requires s_last_xinput populated by
 // PollXInput earlier in the frame) and synthesize wheel / tab events
@@ -726,15 +729,23 @@ static void PollRightStick()
     if (!StickMap_Enabled()) return;
     if (s_last_xinput_rc.load(std::memory_order_relaxed) != 0) return;
 
-    // R3 (right thumb click) -> Esc, edge-triggered. Handled first so
-    // it fires on a plain click without the stick also being pushed
-    // past the deadzone (the stick-push gate below would otherwise
-    // early-return and skip the R3 detection entirely).
+    // Thumb-click -> menu nav: L3 = Enter (confirm), R3 = Esc (cancel).
+    // Both edge-triggered so one tap = one key. Handled first so they
+    // fire on a plain click without the stick also being pushed past
+    // the deadzone (the stick-push gate below would otherwise early-
+    // return and skip the thumb-click detection entirely).
     {
-        const bool r3_down = (s_last_xinput.Gamepad.wButtons & XBTN_R3) != 0;
+        const WORD btns = s_last_xinput.Gamepad.wButtons;
+
+        const bool r3_down = (btns & XBTN_R3) != 0;
         if (r3_down && !s_r3_was_down)
             SendScancodeSimple(kScanEsc, /*extended=*/false);
         s_r3_was_down = r3_down;
+
+        const bool l3_down = (btns & XBTN_L3) != 0;
+        if (l3_down && !s_l3_was_down)
+            SendScancodeSimple(kScanEnter, /*extended=*/false);
+        s_l3_was_down = l3_down;
     }
 
     const SHORT ry = s_last_xinput.Gamepad.sThumbRY;

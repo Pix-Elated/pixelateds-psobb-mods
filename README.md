@@ -132,7 +132,8 @@ menu / UI navigation:
 - **Up / down** → mouse wheel (camera zoom in / out)
 - **Push left** → PgDn
 - **Push right** → PgUp
-- **R3 (click)** → Esc (edge-triggered, one tap per press)
+- **L3 (left stick click)** → Enter (confirm — edge-triggered)
+- **R3 (right stick click)** → Esc (cancel — edge-triggered)
 
 PgUp / PgDn are sent with the extended-key flag so Windows routes
 them to the nav cluster instead of NumPad 9 / NumPad 3 (which share
