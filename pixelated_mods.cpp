@@ -51,6 +51,7 @@ static void LoadConfig();
 static void SaveConfig();
 static void LoadCuratedIdLists();
 static void AppendUserFilter(uint32_t id24, const char *name);
+static void RemoveUserFilter(uint32_t id24);
 static uintptr_t GetLocalPlayerPtr();
 static void WheelFilterTryInstall();
 static void WheelFilterUninstall();
@@ -97,7 +98,6 @@ namespace pso_offsets {
     extern uintptr_t BossDataPtr;
     extern uintptr_t EphineaMonsterArray;
     extern uintptr_t EphineaHPScale;
-    extern uintptr_t LocaleFlag;
 
     // De Rol Le HP offsets (on entity struct, NOT boss pointer)
     constexpr uintptr_t DRL_BodyMaxHP      = 0x6B0;  // i32
@@ -251,16 +251,6 @@ namespace pso_offsets {
     constexpr uint32_t  MaxItemsPerFloorSanityCap = 256;
 }
 
-// ============================================================================
-// Localized strings + locale detection
-// ============================================================================
-
-enum class Locale { English = 0, Japanese = 1 };
-
-struct LocalizedString {
-    const char *en;
-    const char *jp;
-};
 
 // ============================================================================
 // Entity type system — cls-based identification
@@ -278,37 +268,26 @@ enum class EntityRole {
     BossSubpart,        // boss sub-entity sharing HP pool: hide
     BossProjectile,     // mines, trackers: hide from HP bar
     CollapseByName,     // aggregate into (×N) row by name + max_hp (Vol Opt parts)
+    Hidden,             // surgical cls-keyed hide (e.g. Dark Falz obelisk)
 };
+
+// Localized string pair. `en` is required, `jp` is optional (fall back
+// to `en` when nullptr).
+struct LocalizedString {
+    const char *en;
+    const char *jp;
+};
+
+enum class Locale { English = 0, Japanese = 1 };
 
 struct EntityType {
     EntityRole role;
     // nullptr = resolve via the game's unitxt table. Non-null only for
-    // entities the game itself doesn't name (Vol Opt sub-parts, Olga Flow
-    // hitboxes, etc.) — those carry a LocalizedString so they still
-    // follow the user's EN/JP locale.
+    // entities the game itself doesn't name (Vol Opt sub-parts, Olga
+    // Flow hitboxes, etc.) — those carry a LocalizedString so they
+    // still follow the user's EN/JP locale.
     const LocalizedString *synth_name;
 };
-
-// Single source of truth for the full Dark Falz cls cluster. Every
-// site that needs to ask "is this a Dark Falz entity?" goes through
-// this function. Covers the obelisk, all phase bodies, dormant
-// variants, subparts, and the BossSubpart cls values that carry the
-// real phase 2/3 HP.
-static bool IsDarkFalzCls(uintptr_t cls)
-{
-    switch (cls) {
-    case 0x00A44D6C: case 0x00A44F40: case 0x00A44F7C:
-    case 0x00A44FAC: case 0x00A44FDC: case 0x00A45008:
-    case 0x00A4504C: case 0x00A45084: case 0x00A45194:
-    case 0x00A45198: case 0x00A4519C: case 0x00A451A0:
-    case 0x00A451A4: case 0x00A451A8: case 0x00A451AC:
-    case 0x00A451B0: case 0x00A451E4: case 0x00A45200:
-    case 0x00A4570C:
-    case 0x00A45804: case 0x00A45808: case 0x00A45960: case 0x00A45964:
-        return true;
-    }
-    return false;
-}
 
 static EntityType LookupEntityType(uintptr_t cls)
 {
@@ -326,12 +305,14 @@ static EntityType LookupEntityType(uintptr_t cls)
     static const LocalizedString kSynthVolOptChandelier  = { "Vol Opt Chandelier", "ヴォル・オプト シャンデリア" };
     static const LocalizedString kSynthVolOptMonitor     = { "Vol Opt Monitor",    "ヴォル・オプト モニター" };
     static const LocalizedString kSynthVolOptPanel       = { "Vol Opt Panel",      "ヴォル・オプト パネル" };
-    static const LocalizedString kSynthVolOptSpire       = { "Vol Opt Spire",      "ヴォル・オプト スパイア" };
+    static const LocalizedString kSynthVolOptPillar      = { "Vol Opt Pillar",     "ヴォル・オプト ピラー" };
     static const LocalizedString kSynthBarbaRayMinion    = { "Barba Ray Minion",   "バルバ・レイの手下" };
     static const LocalizedString kSynthOlgaFlowHitbox    = { "Olga Flow Hitbox",   "オルガ・フロウ ヒットボックス" };
     static const LocalizedString kSynthOlgaFlowBall      = { "Olga Flow Ball",     "オルガ・フロウ ボール" };
     static const LocalizedString kSynthDarkFalzDarvant   = { "Dark Falz Darvant",  "ダーク・ファルス ダーヴァント" };
-    static const LocalizedString kSynthDubwitch          = { "Dubwitch",           "ドブウィッチ" };
+    static const LocalizedString kSynthDarkFalzPhase2    = { "Dark Falz (Phase 2)","ダーク・ファルス (第二形態)" };
+    static const LocalizedString kSynthDarkFalzPhase3    = { "Dark Falz (Final Form)","ダーク・ファルス (最終形態)" };
+    static const LocalizedString kSynthDubswitch         = { "Dubswitch",          "ドブスイッチ" };
 
     switch (cls)
     {
@@ -339,7 +320,7 @@ static EntityType LookupEntityType(uintptr_t cls)
     // in the auto-generated entity_cls_table.h. These must come
     // BEFORE the #include so the case matches first.
     case 0x00A8EB8C:
-        return { EntityRole::CollapseByName, &kSynthDubwitch };
+        return { EntityRole::CollapseByName, &kSynthDubswitch };
 
 #include "entity_cls_table.h"
     default:
@@ -477,30 +458,19 @@ static std::string GetMonsterName(uint32_t unitxt_id, bool ultimate)
 // Locale detection + synthetic-name localization
 // ============================================================================
 //
-// The game's unitxt table already returns strings in the player's locale
-// (English or Japanese — the two locales PSOBB shipped with). For any
-// entity the game itself can name via unitxt, we use that directly and
-// the display follows the game's language.
+// The game's own unitxt table returns strings in the player's locale
+// directly, so any entity the game itself can name needs no help from us.
 //
-// A small number of entities are OUR inventions — sub-parts the game
-// lumps under one unitxt entry (Vol Opt Chandelier/Monitor/Panel/Spire
-// are all just "Vol Opt" to the game; Olga Flow hitboxes have no name).
-// Those entries carry a LocalizedString with both EN and JP strings so
-// they still display correctly regardless of the user's locale.
-
-// Locale flag address — PSOBB's language-selector dword.
-// Verified via r2 xref chain from str.unitxt_e.prs → selector
-// fcn.00793304 → caller fcn.007933bc which reads this dword as the
-// index into an 8-entry locale table. Values:
-//   0 = Japanese   (unitxt_j.prs)
-//   1 = English    (unitxt_e.prs)
-//   2 = German     (unitxt_g.prs)
-//   3 = French     (unitxt_f.prs)
-//   4 = Spanish    (unitxt_s.prs)
-//   5 = Chinese Simplified
-//   6 = Chinese Traditional
-//   7 = Korean
-// We only ship EN + JP strings. Anything else falls back to EN.
+// A handful of entities are OUR synthetics — sub-parts the game lumps
+// under one unitxt entry (Vol Opt Chandelier/Monitor/Panel/Spire), Olga
+// Flow hitboxes, Dubswitch, etc. Those need their own EN/JP strings so
+// they render correctly regardless of the user's locale.
+//
+// We detect locale by sniffing what the game's own unitxt table returns
+// for a known uid. ASCII-only result → Latin-script locale (treat as
+// English); high-byte result → CJK locale (treat as Japanese). This
+// avoids hunting for an ambiguous raw flag address and piggy-backs on
+// the unitxt pipeline we already know works.
 
 static Locale DetectGameLocale()
 {
@@ -508,10 +478,22 @@ static Locale DetectGameLocale()
     static bool   s_probed = false;
     if (s_probed) return s_cached;
 
-    const uint32_t flag = SafeRead<uint32_t>(pso_offsets::LocaleFlag, 0xFFFFFFFFu);
-    if (flag == 0xFFFFFFFFu) return s_cached;
+    // "Booma" (uid 2) is one of the earliest, most reliable names in
+    // the unitxt table — guaranteed present on every locale/difficulty.
+    // Fall back to a couple of nearby uids if the read comes back empty
+    // (unitxt may not be populated yet during the first frame or two).
+    std::string sample;
+    for (uint32_t uid : {2u, 1u, 3u, 10u})
+    {
+        sample = UnitxtRead(2, uid);
+        if (!sample.empty()) break;
+    }
+    if (sample.empty()) return s_cached;  // not ready, try again next call
+
     s_probed = true;
-    s_cached = (flag == 0) ? Locale::Japanese : Locale::English;
+    s_cached = (static_cast<uint8_t>(sample[0]) >= 0x80)
+        ? Locale::Japanese
+        : Locale::English;
     return s_cached;
 }
 
@@ -521,6 +503,7 @@ static const char *Localize(const LocalizedString &s)
     if (loc == Locale::Japanese && s.jp != nullptr) return s.jp;
     return s.en;  // default (also the fallback when jp is null)
 }
+
 
 // Apply Ultimate-difficulty name swaps for the Vol Opt sub-part
 // synthetic-name path. Phase 1 sub-parts (Chandelier/Monitor/Panel/
@@ -533,7 +516,7 @@ static std::string ApplyUltimateNameSwap(std::string name, bool ultimate)
     if (name == "Vol Opt Chandelier") return "Vol Opt ver.2 Chandelier";
     if (name == "Vol Opt Monitor")    return "Vol Opt ver.2 Monitor";
     if (name == "Vol Opt Panel")      return "Vol Opt ver.2 Panel";
-    if (name == "Vol Opt Spire")      return "Vol Opt ver.2 Spire";
+    if (name == "Vol Opt Pillar")     return "Vol Opt ver.2 Pillar";
     return name;
 }
 
@@ -783,6 +766,33 @@ static std::vector<Monster> GetAliveMonsters()
     const uint32_t player_count = SafeRead<uint32_t>(pso_offsets::PlayerCount);
     if (entity_count == 0 || entity_count > 1024) return out;
 
+    // One-shot per-session diagnostic: log our entity-array base
+    // against the two Ghidra-known list globals so we can tell
+    // whether anything we're missing (like Dark Falz Phase 3) lives
+    // in a different list than we're iterating.
+    //
+    //   0x00AB0210  g_p_object_list          (pointer-to-array)
+    //   0x00AB0214  g_p_monster_structure_list (pointer-to-array)
+    //
+    // If either resolves to a non-null pointer that differs from our
+    // entity_array base, we have a second array to consider.
+    {
+        static bool s_lists_probed = false;
+        if (!s_lists_probed)
+        {
+            s_lists_probed = true;
+            const uintptr_t g_p_object_list  = SafeRead<uintptr_t>(0x00AB0210);
+            const uintptr_t g_p_monster_list = SafeRead<uintptr_t>(0x00AB0214);
+            PSO_LOG("entity-lists our_base=0x%08X "
+                    "g_p_object_list=0x%08X g_p_monster_list=0x%08X "
+                    "entity_count=%u player_count=%u",
+                    (unsigned)entity_array,
+                    (unsigned)g_p_object_list,
+                    (unsigned)g_p_monster_list,
+                    entity_count, player_count);
+        }
+    }
+
     const bool ultimate = SafeRead<uint32_t>(pso_offsets::Difficulty) == 3;
 
     // Snapshot the local player's current-target entity ID once per
@@ -877,48 +887,6 @@ static std::vector<Monster> GetAliveMonsters()
         else ++it;
     }
 
-    // ---- Dark Falz pre-scan: pick the closest single entity ----
-    //
-    // The Dark Falz fight spawns up to ~20 different cls values at
-    // once: the pre-fight obelisk placeholder at 0x00A44D6C (fixed
-    // pos -9989, 5, -161) plus Phase 1/2 rendered bodies and subparts
-    // under 0x00A44F40..0x00A45200 + 0x00A4570C. Every one of them
-    // carries max_hp = 6500, so letting the standard aggregation run
-    // would sum them into an HP bar reading 13000, 19500, etc. and
-    // the distance column would lock to whichever entity we saw
-    // first instead of the one the player is actually near.
-    //
-    // Fix: pick ONE Dark Falz entity per frame — the one closest to
-    // the player — and stash its address in `df_primary_addr`. Any
-    // later Dark Falz entity we encounter during the main loop that
-    // isn't this address gets skipped.
-    // Dark Falz identity discriminator.
-    //
-    // Offline log analysis of entity dumps during live Dark Falz
-    // fights (Normal + Ultimate, phase 1/2/3) shows that every real
-    // Dark Falz body has unitxt_id == 47, across only three cls
-    // values (one per phase: 0x00A4570C / 0x00A45808 / 0x00A45960).
-    // The peace-area obelisk is cls=0x00A44D6C with uid=0. Filtering
-    // by uid=47 drops the obelisk and all dormant cls variants in
-    // one shot — no distance heuristic, no HP guesswork.
-    //
-    // Only one real body exists at a time (phase transitions replace
-    // the entity), so the first uid=47 hit is the primary.
-    constexpr uint32_t kUidDarkFalz = 47;
-    uintptr_t df_primary_addr = 0;
-    for (uint32_t i = 0; i < entity_count; ++i)
-    {
-        const uintptr_t slot = entity_array + 4 * (i + player_count);
-        const uintptr_t a    = SafeRead<uintptr_t>(slot);
-        if (a == 0) continue;
-        const uint32_t uid = SafeRead<uint32_t>(a + pso_offsets::MonsterUnitxtID);
-        if (uid != kUidDarkFalz) continue;
-        const int16_t hp = SafeRead<int16_t>(a + pso_offsets::MonsterHP);
-        if (hp <= 0) continue;
-        df_primary_addr = a;
-        break;
-    }
-
     out.reserve(entity_count);
 
     for (uint32_t i = 0; i < entity_count; ++i)
@@ -965,12 +933,61 @@ static std::vector<Monster> GetAliveMonsters()
         // identity. All hide/rename/collapse decisions are driven by this.
         const EntityType etype = LookupEntityType(m.cls_meta);
 
+        // Per-session unique-entity dump. Keyed on (cls_meta, uid,
+        // max_hp) so difficulty variants of the same entity log as
+        // separate rows. Fires once per unique signature; capped at
+        // 512 rows so a pathological session can't spam the log.
+        //
+        // Fires BEFORE every drop gate below (role filter, hp/flags
+        // checks, collapse distance, room mismatch, etc.) so every
+        // entity the game places in the array shows up here — even
+        // ones we'd normally filter. User curates hide lists from
+        // real observed data rather than speculative cls lists.
+        {
+            static std::unordered_set<uint64_t> s_entity_dump_seen;
+            const uint64_t sig =
+                (static_cast<uint64_t>(m.cls_meta) << 32) |
+                (static_cast<uint64_t>(m.unitxt_id) << 16) |
+                static_cast<uint64_t>(m.max_hp & 0xFFFF);
+            if (s_entity_dump_seen.size() < 2048 &&
+                s_entity_dump_seen.insert(sig).second)
+            {
+                const std::string name =
+                    GetMonsterName(m.unitxt_id, ultimate);
+                const uint16_t dormant = SafeRead<uint16_t>(
+                    mon_addr + pso_offsets::EntityDormant);
+                const char *role_str = "?";
+                switch (etype.role) {
+                case EntityRole::NormalMob:        role_str = "NormalMob"; break;
+                case EntityRole::SegmentBossBody:  role_str = "SegBossBody"; break;
+                case EntityRole::SegmentBossShell: role_str = "SegBossShell"; break;
+                case EntityRole::BossSubpart:      role_str = "BossSubpart"; break;
+                case EntityRole::BossProjectile:   role_str = "BossProjectile"; break;
+                case EntityRole::CollapseByName:   role_str = "CollapseByName"; break;
+                }
+                PSO_LOG("entity-dump cls=0x%08X uid=%u name='%s' "
+                        "hp=%d/%d room=%u flags=0x%04X dormant=0x%04X "
+                        "role=%s addr=0x%08X",
+                        (unsigned)m.cls_meta, m.unitxt_id,
+                        name.c_str(), m.hp, m.max_hp, m.room,
+                        m.entity_flags, dormant, role_str,
+                        (unsigned)mon_addr);
+            }
+        }
+
         // Projectiles (mines, trackers): always hidden from HP bar.
         if (etype.role == EntityRole::BossProjectile)
             continue;
 
         // Boss subparts sharing HP pool: hidden (they don't have independent HP).
         if (etype.role == EntityRole::BossSubpart)
+            continue;
+
+        // Surgical cls-keyed hide — decorative placeholders like the
+        // Dark Falz peace-area obelisk that the game treats as a full
+        // entity (with real HP even) but which we don't want in the
+        // HP panel because the player can't interact with them.
+        if (etype.role == EntityRole::Hidden)
             continue;
 
         // Shell HP for De Rol Le / Barba Ray segments. Uses boss_root
@@ -988,24 +1005,14 @@ static std::vector<Monster> GetAliveMonsters()
         if (m.hp <= 0 || m.max_hp <= 0) continue;   // signed check: catches negative HP
         if ((m.entity_flags & 0x0800) != 0) continue;
 
-        if (mon_addr != df_primary_addr && IsDarkFalzCls(m.cls_meta))
-            continue;
-
         // De Rol Le (uid=45) and Dal Ra Lie/Barba Ray (uid=73) have
         // dummy 20000 HP at the standard +0x334/+0x2BC offsets. The
         // real body HP lives at entity-specific offsets (+0x6B4 etc.)
         // and is read by BuildHpRows → ReadDeRolLeHP/ReadBarbaRayHP.
-        // Do NOT override per-entity HP here — it would corrupt the
-        // boss-parts collapse logic (which needs all segments to have
-        // the same max_hp so no "dominant primary" is detected).
-
-        if (m.hp == 0 || m.max_hp == 0) continue;
 
         // Vol Opt: all parts share room 0 across both phases. Distance
-        // gate hides the inactive phase (>1000u away). Skip the gate
-        // for Dark Falz cls which lives at a fixed arena-edge position.
-        if (etype.role == EntityRole::CollapseByName && have_player_pos &&
-            !IsDarkFalzCls(m.cls_meta))
+        // gate hides the inactive phase (>1000u away).
+        if (etype.role == EntityRole::CollapseByName && have_player_pos)
         {
             const float mx = SafeRead<float>(mon_addr + 0x38);
             const float mz = SafeRead<float>(mon_addr + 0x40);
@@ -1155,25 +1162,19 @@ static std::vector<Monster> GetAliveMonsters()
         // this bypass the room filter hides the boss and the panel
         // shows "No enemies in room" mid-fight.
         //
-        // Boss uids that need the bypass:
-        //   46  Vol Opt
-        //   47  Vol Opt v2 (and Dark Falz in some Ephinea builds)
-        //   45  De Rol Le
+        // Boss uids that need a room-filter bypass because their
+        // entity lives in a sub-room different from the player's:
         //   44  Dal Ra Lie / Barba Ray
+        //   45  De Rol Le
+        //   46  Vol Opt
+        //   47  Vol Opt ver.2 (and Dark Falz on stock PSOBB)
         //   78  Olga Flow
-        //
-        // Boss CLSes that need the bypass (by class id, locale-
-        // independent — necessary because Ephinea's Dark Falz body
-        // entity carries uid=0, so the uid-based set above doesn't
-        // match it). Add other "phantom-uid" bosses here as we find
-        // them.
         static const std::unordered_set<uint32_t> kBossRoomBypass = {
             44, 45, 46, 47, 78,
         };
         if (local_player != 0 &&
             m.room != player_room1 && m.room != player_room2 &&
-            kBossRoomBypass.find(m.unitxt_id) == kBossRoomBypass.end() &&
-            !IsDarkFalzCls(m.cls_meta))
+            kBossRoomBypass.find(m.unitxt_id) == kBossRoomBypass.end())
         {
             continue;
         }
@@ -1190,43 +1191,70 @@ static std::vector<Monster> GetAliveMonsters()
         if (m.cls_meta == 0x00A449D0)
         {
             const uintptr_t bp = SafeRead<uintptr_t>(mon_addr + 0x2B4);
-            if (bp != 0)
+            const uint16_t template_hp = (bp != 0)
+                ? SafeRead<uint16_t>(bp + 0x06)
+                : 0;
+
+            // One-shot diagnostic per unique (max_hp, template_hp) pair
+            // so we can verify the disambig is actually firing and see
+            // what values we're comparing.
             {
-                const uint16_t template_hp = SafeRead<uint16_t>(bp + 0x06);
-                if (template_hp > 0)
+                static std::unordered_set<uint32_t> s_volopt_seen;
+                const uint32_t key = (static_cast<uint32_t>(m.max_hp) << 16) |
+                                     static_cast<uint32_t>(template_hp);
+                if (s_volopt_seen.size() < 16 &&
+                    s_volopt_seen.insert(key).second)
                 {
-                    // Mirror the synthetic name strings here — the cls
-                    // table file-scope statics are not reachable from
-                    // outside LookupEntityType, and we're post-collection.
-                    static const LocalizedString kPanel   = { "Vol Opt Panel",   "ヴォル・オプト パネル" };
-                    static const LocalizedString kMonitor = { "Vol Opt Monitor", "ヴォル・オプト モニター" };
-                    const LocalizedString &pick = (m.max_hp > template_hp)
-                        ? kMonitor : kPanel;
-                    m.name = ApplyUltimateNameSwap(Localize(pick), ultimate);
+                    PSO_LOG("volopt-disambig cls=0x00A449D0 max_hp=%d "
+                            "template_hp=%u bp=0x%08X → %s",
+                            m.max_hp, template_hp, (unsigned)bp,
+                            (template_hp == 0)
+                                ? "SKIP (no bp/template)"
+                                : (m.max_hp > template_hp
+                                    ? "Monitor (boosted)"
+                                    : "Panel (template)"));
                 }
+            }
+
+            if (template_hp > 0)
+            {
+                // Mirror the synthetic name strings here — the cls
+                // table file-scope statics are not reachable from
+                // outside LookupEntityType, and we're post-collection.
+                static const LocalizedString kPanel   = { "Vol Opt Panel",   "ヴォル・オプト パネル" };
+                static const LocalizedString kMonitor = { "Vol Opt Monitor", "ヴォル・オプト モニター" };
+                const LocalizedString &pick = (m.max_hp > template_hp)
+                    ? kMonitor : kPanel;
+                m.name = ApplyUltimateNameSwap(Localize(pick), ultimate);
             }
         }
 
         // Name resolution priority:
         //   1. Existing m.name (already set above by Vol Opt Monitor/
         //      Panel disambig or the uid=0 parent-chain branch).
-        //   2. Game's unitxt name (already locale-correct + Ult-aware).
-        //   3. Synthetic name for entities the game itself doesn't
-        //      distinguish (Vol Opt sub-parts, Olga Flow hitboxes, …).
-        //      These get Ult-swapped for the Vol Opt sub-part cluster.
+        //   2. Synthetic name for entities the cls table explicitly
+        //      labels (Vol Opt Chandelier/Spire, Olga Flow Hitbox,
+        //      Dragon Subpart, etc.). A synth override is declared
+        //      precisely because the generic unitxt name isn't
+        //      specific enough, so it must win over the game name.
+        //   3. Game's unitxt name (locale-correct + Ult-aware).
         //   4. Empty string, handled by the unnamed-monster branch below.
         if (m.name.empty())
         {
-            std::string game_name = GetMonsterName(m.unitxt_id, ultimate);
-            const bool game_name_ok = !game_name.empty() && game_name != "Unknown";
-
-            if (game_name_ok)
-                m.name = std::move(game_name);
-            else if (etype.synth_name)
+            if (etype.synth_name)
+            {
                 m.name = ApplyUltimateNameSwap(
                     Localize(*etype.synth_name), ultimate);
+            }
             else
-                m.name = std::move(game_name);  // may be empty, handled below
+            {
+                std::string game_name = GetMonsterName(m.unitxt_id, ultimate);
+                if (!game_name.empty() && game_name != "Unknown")
+                    m.name = std::move(game_name);
+                // else: leave empty, the unnamed-monster branch below
+                //       either applies the "Hide unnamed" toggle or
+                //       fills in a "Monster #N" fallback.
+            }
         }
 
         // Surgical hide: drop any monster whose unitxt_id is in the
@@ -1242,38 +1270,19 @@ static std::vector<Monster> GetAliveMonsters()
         // "Unnamed" means the name came back empty OR it came back
         // as the literal string "Unknown" from PSO's own unitxt
         // table. PSO tags certain boss sub-entities and decorative
-        // hitboxes (e.g. Olga Flow's anchored body hitbox) with the
-        // name "Unknown" in its internal string table, which is how
-        // they show up in the HP panel. We log each distinct
-        // unnamed unitxt_id once per session so the user can find
-        // the exact ID to add to pixelated_mods_monster_hidden.txt.
+        // hitboxes (e.g. Olga Flow's anchored body hitbox) with
+        // "Unknown" in its internal string table. The entity-dump
+        // log earlier in this function already records every unique
+        // (cls, uid, max_hp) signature the session encounters, so
+        // the user can correlate from pixelated_mods.log and add
+        // IDs to pixelated_mods_monster_hidden.txt from real data.
         const bool unnamed = m.name.empty() || m.name == "Unknown";
 
         if (unnamed)
         {
-            // Log each distinct unnamed unitxt_id the first time we
-            // see it this session. Rate-limited to 16 distinct IDs
-            // to avoid a log flood if the entity array has many
-            // unnamed decorative hitboxes.
-            static uint32_t s_seen_ids[16] = {};
-            static int      s_seen_count    = 0;
-            bool already_logged = false;
-            for (int k = 0; k < s_seen_count; ++k)
-                if (s_seen_ids[k] == m.unitxt_id) { already_logged = true; break; }
-            if (!already_logged && s_seen_count < 16)
-            {
-                s_seen_ids[s_seen_count++] = m.unitxt_id;
-                PSO_LOG("GetAliveMonsters: unnamed monster unitxt_id=%u "
-                        "name='%s' hp=%u/%u flags=0x%04X room=%u addr=0x%08X",
-                        m.unitxt_id, m.name.c_str(),
-                        m.hp, m.max_hp, m.entity_flags,
-                        m.room, m.address);
-            }
-
             // Blanket fallback: if the user has explicitly enabled
-            // "Hide unnamed monsters" they lose the diagnostic value
-            // but get the immediate effect of every unnamed entity
-            // disappearing. Default is off.
+            // "Hide unnamed monsters" they get the immediate effect
+            // of every unnamed entity disappearing. Default is off.
             if (g_hide_unnamed_monsters)
                 continue;
 
@@ -1310,7 +1319,42 @@ static std::vector<Monster> GetAliveMonsters()
         out.push_back(std::move(m));
     }
 
-    // Pan Arms filtering handled by pre-scan + inline check above.
+    // Target-miss diagnostic: if the game has a live target ID but
+    // nothing in `out` carries that entity ID, the entity is either
+    // outside the array we iterate (wrong list?), has been dropped
+    // by a filter gate, or simply wasn't in the entity_array scan
+    // range. Rate-limited to distinct target IDs so a single missed
+    // target doesn't spam the log every frame.
+    //
+    // This is the smoking gun for the Dark Falz Phase 3 problem:
+    // the bottom-left HUD shows a name (so the game resolves target
+    // → name just fine), but nothing in our HP panel. If that line
+    // fires for Phase 3, our array iteration is the wrong place to
+    // look.
+    if (target_id != INT32_MIN)
+    {
+        bool found = false;
+        for (const auto &mm : out)
+        {
+            if (static_cast<int>(mm.entity_id) == target_id)
+            {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+        {
+            static std::unordered_set<int> s_target_miss_seen;
+            if (s_target_miss_seen.size() < 64 &&
+                s_target_miss_seen.insert(target_id).second)
+            {
+                PSO_LOG("target-miss eid=%d — game has target but no "
+                        "entity with that id is in our collected list "
+                        "(out.size=%zu, entity_count=%u)",
+                        target_id, out.size(), entity_count);
+            }
+        }
+    }
 
     return out;
 }
@@ -1318,6 +1362,25 @@ static std::vector<Monster> GetAliveMonsters()
 // ============================================================================
 // Floor items
 // ============================================================================
+
+// Why a floor item is NOT showing in the main visible list. Populated
+// by ClassifyItem + the area/distance gates in GetFloorItems so the
+// "Hidden in view" sidebar can tell the user exactly which filter is
+// suppressing each entry. `Visible` means the item shows normally.
+enum class HideReason : int {
+    Visible = 0,
+    OtherFloor,           // "only current floor" is on, item is on a different floor
+    TooFar,               // distance cap exceeded
+    UserHideList,         // 24-bit ID is in pixelated_mods_hidden.txt
+    GearOnlyMode,         // filter mode Gear-only, item isn't weapon/armor/shield/unit/mag
+    LowHitWeapon,         // BBMod: hide weapons below minimum hit %
+    LowSocketArmor,       // BBMod: hide non-4-slot armor
+    AllArmorHidden,       // BBMod: HideLowSocket + HideFourSocket combination
+    UnitsHidden,          // BBMod: hide all units
+    MesetaHidden,         // BBMod: hide meseta
+    ToolCategoryOff,      // per-sub-type tool toggle is off (mates, fluids, etc.)
+    TechDiskBelowMin,     // tech disk level < min-level slider
+};
 
 struct FloorItem
 {
@@ -1350,6 +1413,7 @@ struct FloorItem
     DWORD       first_seen_tick;  // GetTickCount() when this drop first appeared
     bool        is_rare;
     bool        is_on_player_floor;  // item.area == player's current area
+    HideReason  hide_reason;         // populated for items in the hidden sidebar
 };
 
 // Set of 24-bit item IDs considered "rare red box" drops, loaded from
@@ -2099,113 +2163,126 @@ static bool ShieldHasNotableBonus(const uint8_t b[12])
 //   4. FilterMode::Gear  -> show only equipment types (weapons / armor /
 //                           shields / units / mags), hide everything else
 //   5. Per-type checks below
-static bool ShouldShowItem(const uint8_t b[12], const uint8_t /*b2*/[4],
-                           uint32_t id24)
+// Classify an item against all active filters. Returns HideReason::Visible
+// if the item passes, otherwise the first filter it failed. Order matches
+// the legacy ShouldShowItem flow — rare-override beats user-hide-list,
+// user-hide beats category/mode filters, etc.
+static HideReason ClassifyItem(const uint8_t b[12], const uint8_t /*b2*/[4],
+                               uint32_t id24)
 {
     const uint8_t type = b[0];
     const uint8_t sub  = b[1];
 
     if (g_filter_mode == FilterMode::All)
-        return true;
+        return HideReason::Visible;
 
     // Rares always pass. Has to be checked BEFORE the hidden-list check
     // so that a rare item the user accidentally added to pixelated_mods_hidden
     // still surfaces.
     if (IsRareItem(b, id24))
-        return true;
+        return HideReason::Visible;
 
-    // User-curated hidden list with stat-based overrides. An item in
-    // pixelated_mods_hidden.txt normally hides, but if its stats exceed the
-    // thresholds in WeaponHasNotableStats / ArmorHasNotableBonus /
-    // ShieldHasNotableBonus, we surface it anyway. The result: trash
-    // base-tier drops are filtered out, lucky high-stat rolls of the
-    // same ID still appear.
+    // User-curated hidden list with stat-based overrides.
     if (g_hidden_ids.find(id24) != g_hidden_ids.end())
     {
-        if (type == 0x00 && WeaponHasNotableStats(b)) return true;
-        if (type == 0x01 && sub == 0x01 && ArmorHasNotableBonus(b))  return true;
-        if (type == 0x01 && sub == 0x02 && ShieldHasNotableBonus(b)) return true;
-        // Units (type 0x01 sub 0x03), mags (type 0x02), tools, meseta,
-        // etc. have no stat-based override — they're binary hide/show.
-        return false;
+        if (type == 0x00 && WeaponHasNotableStats(b)) return HideReason::Visible;
+        if (type == 0x01 && sub == 0x01 && ArmorHasNotableBonus(b))  return HideReason::Visible;
+        if (type == 0x01 && sub == 0x02 && ShieldHasNotableBonus(b)) return HideReason::Visible;
+        return HideReason::UserHideList;
     }
 
     if (g_filter_mode == FilterMode::Gear)
-        return type == 0x00 || type == 0x01 || type == 0x02;
+    {
+        if (type == 0x00 || type == 0x01 || type == 0x02)
+            return HideReason::Visible;
+        return HideReason::GearOnlyMode;
+    }
 
     // ===== Notable mode (the default) =====
 
-    // Weapons (type 0x00).
+    // Weapons.
     if (type == 0x00)
     {
-        // HideLowHitWeapons: scan the 3 attribute slots for hit% (type
-        // byte 5) and hide if it's below HitMin. Item Reader's "stats[6]"
-        // is preprocessed; our 12-byte item record stores attributes as
-        // (type, value) pairs at bytes [6,7] [8,9] [10,11].
         if (g_filter_hide_low_hit_weapons)
         {
-            if (ExtractWeaponAttrs(b).hit < g_filter_hit_min) return false;
+            if (ExtractWeaponAttrs(b).hit < g_filter_hit_min)
+                return HideReason::LowHitWeapon;
         }
-        return true;
+        return HideReason::Visible;
     }
 
-    // Frames / armor (type 0x01 sub 0x01). Item Reader's nested socket
-    // logic: HideLowSocketArmor on -> only 4-slot armor passes, unless
-    // HideFourSocketArmor is also on, in which case nothing passes.
+    // Frames / armor.
     if (type == 0x01 && sub == 0x01)
     {
         if (g_filter_hide_low_socket_armor)
         {
             const uint8_t slots = b[5];
-            if (slots != 4) return false;
-            if (g_filter_hide_four_socket_armor) return false;
+            if (slots != 4) return HideReason::LowSocketArmor;
+            if (g_filter_hide_four_socket_armor) return HideReason::AllArmorHidden;
         }
-        return true;
+        return HideReason::Visible;
     }
 
-    // Shields / barriers (type 0x01 sub 0x02). Item Reader has no
-    // shield-specific filter — shields always pass in Notable mode.
+    // Shields / barriers.
     if (type == 0x01 && sub == 0x02)
-        return true;
+        return HideReason::Visible;
 
-    // Units (type 0x01 sub 0x03). HideUnits hides every unit
-    // unconditionally. Item Reader calls this HideUselessUnits but the
-    // implementation has no per-unit logic, so the name is misleading.
+    // Units.
     if (type == 0x01 && sub == 0x03)
     {
-        if (g_filter_hide_units) return false;
-        return true;
+        if (g_filter_hide_units) return HideReason::UnitsHidden;
+        return HideReason::Visible;
     }
 
-    // Mags (type 0x02). Always pass — Item Reader has no mag filter.
+    // Mags.
     if (type == 0x02)
-        return true;
+        return HideReason::Visible;
 
-    // Tools (type 0x03). Per-sub-type toggles, same as before.
+    // Tools.
     if (type == 0x03)
     {
         // Tech disks: sub-type toggle plus level slider.
         if (sub == 0x02)
         {
-            if (!g_show_tool_sub[0x02]) return false;
+            if (!g_show_tool_sub[0x02]) return HideReason::ToolCategoryOff;
             const int min_idx = g_tech_disk_min_level - 1;
-            return static_cast<int>(b[2]) >= min_idx;
+            if (static_cast<int>(b[2]) < min_idx) return HideReason::TechDiskBelowMin;
+            return HideReason::Visible;
         }
         // Event badges 0x12..0x15 share one toggle.
         if (sub >= 0x12 && sub <= 0x15)
-            return g_show_tool_sub[0x12];
+            return g_show_tool_sub[0x12] ? HideReason::Visible : HideReason::ToolCategoryOff;
         if (sub < 32)
-            return g_show_tool_sub[sub];
-        return true;
+            return g_show_tool_sub[sub] ? HideReason::Visible : HideReason::ToolCategoryOff;
+        return HideReason::Visible;
     }
 
-    // Meseta (type 0x04). Single all-or-nothing toggle, same as Item
-    // Reader's ignoreMeseta. (We do not implement an amount threshold;
-    // it's not part of the BBMod model and the user opted to match.)
+    // Meseta.
     if (type == 0x04)
-        return !g_filter_hide_meseta;
+        return g_filter_hide_meseta ? HideReason::MesetaHidden : HideReason::Visible;
 
-    return true;
+    return HideReason::Visible;
+}
+
+// Short human-readable label for the "Hidden in view" sidebar.
+static const char *HideReasonLabel(HideReason r)
+{
+    switch (r)
+    {
+    case HideReason::Visible:          return "";
+    case HideReason::OtherFloor:       return "other floor";
+    case HideReason::TooFar:           return "out of range";
+    case HideReason::UserHideList:     return "user hide list";
+    case HideReason::GearOnlyMode:     return "Gear-only mode";
+    case HideReason::LowHitWeapon:     return "low hit %";
+    case HideReason::LowSocketArmor:   return "not 4-slot";
+    case HideReason::AllArmorHidden:   return "BBMod: all armor hidden";
+    case HideReason::UnitsHidden:      return "units hidden";
+    case HideReason::MesetaHidden:     return "meseta hidden";
+    case HideReason::ToolCategoryOff:  return "tool category off";
+    case HideReason::TechDiskBelowMin: return "below tech-disk min level";
+    }
+    return "";
 }
 
 // Locale-aware item name via the game's own ItemPMT table + unitxt
@@ -2326,7 +2403,21 @@ static uintptr_t FindItemPmtRecord(const uint8_t b[12])
     case 0x03: { // tools / tech disks: pmt+0x0C, 24-byte records
         const uintptr_t tools = SafeRead<uintptr_t>(pmt + 0x0C);
         if (tools == 0) return 0;
-        return walk(tools, 26, subtype, variant, 24);
+        // Tech disks (subtype=0x02) store the TECH LEVEL in byte[2],
+        // NOT a variant index. The PMT has a single "Disk" record at
+        // variant 0; the level + tech name are appended separately in
+        // FormatItem. Without this override, a Lv21 Zonde (b[2]=20)
+        // tries to look up variant 20 in the tool table, overshoots
+        // the 1-entry "Disk" bucket, and falls back to the raw id24
+        // hex display.
+        //
+        // Non-disk tools (mates, fluids, atomizers, etc.) carry flag
+        // bits in the high nibble of b[2] on stack drops — observed
+        // b[2] == 0x80 for a plain Monomate which would otherwise be
+        // b[2] == 0x00. Mask to the low 4 bits so "variant" is really
+        // the mono/di/tri / mini/normal/max distinction.
+        const uint32_t var = (subtype == 0x02) ? 0 : (variant & 0x0F);
+        return walk(tools, 26, subtype, var, 24);
     }
     }
     return 0;
@@ -2335,11 +2426,57 @@ static uintptr_t FindItemPmtRecord(const uint8_t b[12])
 static std::string GetItemUnitxtName(const uint8_t b[12])
 {
     const uintptr_t rec = FindItemPmtRecord(b);
-    if (rec == 0) return {};
+    if (rec == 0)
+    {
+        // One-shot diagnostic: log each distinct (type, sub, var)
+        // combination that fails the PMT walk so the user can share
+        // the log and we can see whether count==0, recs==null, or
+        // var overshoots the record count.
+        static std::unordered_set<uint32_t> s_rec_fail_seen;
+        const uint32_t key = (uint32_t(b[0]) << 16) |
+                             (uint32_t(b[1]) << 8)  |
+                              uint32_t(b[2]);
+        if (s_rec_fail_seen.size() < 32 &&
+            s_rec_fail_seen.insert(key).second)
+        {
+            PSO_LOG("pmt-miss rec=null type=0x%02X sub=0x%02X "
+                    "var=0x%02X (id24=%06X) b[5]=%u",
+                    b[0], b[1], b[2], key, b[5]);
+        }
+        return {};
+    }
     const uint32_t name_idx = SafeRead<uint32_t>(rec);
-    if (name_idx == 0) return {};
+    if (name_idx == 0)
+    {
+        static std::unordered_set<uint32_t> s_nidx_fail_seen;
+        const uint32_t key = (uint32_t(b[0]) << 16) |
+                             (uint32_t(b[1]) << 8)  |
+                              uint32_t(b[2]);
+        if (s_nidx_fail_seen.size() < 32 &&
+            s_nidx_fail_seen.insert(key).second)
+        {
+            PSO_LOG("pmt-miss name_idx=0 type=0x%02X sub=0x%02X "
+                    "var=0x%02X (id24=%06X) rec=0x%08X",
+                    b[0], b[1], b[2], key, (unsigned)rec);
+        }
+        return {};
+    }
     std::string s = UnitxtRead(kItemUnitxtGroup, name_idx);
-    if (s.empty() || s == "Unknown") return {};
+    if (s.empty() || s == "Unknown")
+    {
+        static std::unordered_set<uint32_t> s_unitxt_fail_seen;
+        const uint32_t key = (uint32_t(b[0]) << 16) |
+                             (uint32_t(b[1]) << 8)  |
+                              uint32_t(b[2]);
+        if (s_unitxt_fail_seen.size() < 32 &&
+            s_unitxt_fail_seen.insert(key).second)
+        {
+            PSO_LOG("pmt-miss unitxt-empty type=0x%02X sub=0x%02X "
+                    "var=0x%02X (id24=%06X) rec=0x%08X name_idx=%u",
+                    b[0], b[1], b[2], key, (unsigned)rec, name_idx);
+        }
+        return {};
+    }
     return s;
 }
 
@@ -2494,9 +2631,17 @@ static uint64_t HashFloorItem(int area, const uint8_t bytes[12])
 // fresh.
 static std::unordered_map<uint64_t, DWORD> g_floor_item_first_seen;
 
+// Items rejected by the user-curated hide list on this frame — separate
+// from the main visible list. Rendered as a collapsible "Hidden in view"
+// section at the bottom of the floor-items panel so the user can browse
+// and unhide individual IDs without editing pixelated_mods_hidden.txt
+// by hand. Cleared + repopulated every call to GetFloorItems().
+static std::vector<FloorItem> g_hidden_floor_items;
+
 static std::vector<FloorItem> GetFloorItems()
 {
     std::vector<FloorItem> out;
+    g_hidden_floor_items.clear();
 
     const uintptr_t ptrs_array =
         SafeRead<uintptr_t>(pso_offsets::FloorItemsArrayPtr);
@@ -2511,8 +2656,6 @@ static std::vector<FloorItem> GetFloorItems()
     // Cross-floor item positions live in a different world coordinate
     // space and the direction vector between them is meaningless.
     const uint32_t player_floor_actual = GetPlayerCurrentFloor();
-    const uint32_t player_floor =
-        g_filter_current_area ? player_floor_actual : 0xFFFFFFFF;
 
     // Local player world position for the distance computation and
     // distance filter. If the local player isn't resolvable we skip
@@ -2552,12 +2695,15 @@ static std::vector<FloorItem> GetFloorItems()
     const DWORD now = GetTickCount();
     std::unordered_map<uint64_t, DWORD> seen_this_call;
 
+    // Whether we're restricting visible items to the player's floor.
+    // When true we still PROCESS cross-floor items — they get tagged
+    // with HideReason::OtherFloor and surfaced in the hidden sidebar so
+    // the user can see at-a-glance what exists elsewhere on the ship.
+    const bool restrict_to_current_floor =
+        g_filter_current_area && player_floor_actual != 0xFFFFFFFF;
+
     for (uint32_t area = 0; area < pso_offsets::AreaCount; ++area)
     {
-        if (g_filter_current_area && player_floor != 0xFFFFFFFF
-            && area != player_floor)
-            continue;
-
         const uintptr_t floor_items_base =
             SafeRead<uintptr_t>(ptrs_array + area * 4);
         const uint32_t  floor_item_count =
@@ -2637,28 +2783,40 @@ static std::vector<FloorItem> GetFloorItems()
             seen_this_call[h] = item_first_seen;
             const bool is_rare_item = IsRareItem(fi.bytes, fi.id24);
 
-            // Distance filter. Two purposes: declutter the list by
-            // hiding items you've walked past, AND auto-surface them
-            // again when you walk back into range (self-correcting
-            // vs a time-based age filter that loses drops forever).
-            // Rares always bypass. Gated by g_item_distance_cap_enabled
-            // so the user can toggle Nearby mode without losing the
-            // slider value.
-            if (g_item_distance_cap_enabled && g_item_max_distance > 0 &&
-                have_player_pos &&
-                fi.dist_xz > static_cast<float>(g_item_max_distance) &&
-                !is_rare_item)
+            // Classify against every filter (cross-floor, distance
+            // cap, mode, user hide list, BBMod toggles, tech-disk
+            // level, tool category) and stash the first failing
+            // reason. Visible items go into the main `out` list;
+            // everything else goes into `g_hidden_floor_items` so
+            // the sidebar can show the user what's being suppressed
+            // and why — at a glance, including items elsewhere on
+            // the ship and items out of range.
+            HideReason reason = HideReason::Visible;
+            if (restrict_to_current_floor && !fi.is_on_player_floor)
             {
-                continue;
+                reason = HideReason::OtherFloor;
             }
-
-            if (!ShouldShowItem(fi.bytes, fi.bytes2, fi.id24)) continue;
+            else if (g_item_distance_cap_enabled && g_item_max_distance > 0 &&
+                     have_player_pos && fi.is_on_player_floor &&
+                     fi.dist_xz > static_cast<float>(g_item_max_distance) &&
+                     !is_rare_item)
+            {
+                reason = HideReason::TooFar;
+            }
+            else
+            {
+                reason = ClassifyItem(fi.bytes, fi.bytes2, fi.id24);
+            }
 
             fi.is_rare         = is_rare_item;
             fi.display         = FormatItem(fi.entity_ptr, fi.bytes, fi.bytes2, fi.id24);
             fi.first_seen_tick = item_first_seen;
+            fi.hide_reason     = reason;
 
-            out.push_back(std::move(fi));
+            if (reason == HideReason::Visible)
+                out.push_back(std::move(fi));
+            else
+                g_hidden_floor_items.push_back(std::move(fi));
         }
     }
 
@@ -2701,8 +2859,13 @@ enum class Anchor : int {
     BottomCenter = 5,
 };
 
-// Tunables — persisted to pixelated_mods.ini next to the DLL. Defaults place the
-// HUD below PSO's in-game minimap (top-right corner, dropped ~280px).
+// Tunables — persisted to pixelated_mods.ini next to the DLL.
+//
+// Two independently-anchored HUD windows since the v1.0 combined panel
+// was split: the monster-HP ("reader") panel defaults to the left side
+// dropped below the ally party list, and the floor-items panel stays
+// where the original combined panel lived (below PSO's in-game minimap
+// in the top-right corner).
 bool   g_enabled          = true;
 bool   g_always_visible   = true;
 bool   g_show_monster_hp  = true;
@@ -2710,11 +2873,21 @@ bool   g_show_floor_items = true;
 bool   g_show_hp_numbers  = true;
 bool   g_show_hp_bar      = true;
 float  g_bar_width        = 200.0f;
-Anchor g_anchor           = Anchor::TopRight;
-float  g_window_x         = 10.0f;
-float  g_window_y         = 280.0f;
-float  g_window_alpha     = 0.60f;
 bool   g_show_count_header = true;
+
+// Monster HP panel position (top-left by default, dropped ~400px to
+// clear the stacked ally party portraits in the upper-left corner).
+Anchor g_monsters_anchor       = Anchor::TopLeft;
+float  g_monsters_window_x     = 10.0f;
+float  g_monsters_window_y     = 400.0f;
+float  g_monsters_window_alpha = 0.60f;
+
+// Floor items panel position (top-right, below the minimap — where
+// the v1.0 combined panel lived).
+Anchor g_items_anchor          = Anchor::TopRight;
+float  g_items_window_x        = 10.0f;
+float  g_items_window_y        = 280.0f;
+float  g_items_window_alpha    = 0.60f;
 
 // Boss-parts collapse. When enabled, untargeted entities whose
 // display name matches one of the known multi-part-boss names in
@@ -2863,6 +3036,15 @@ float  g_chord_slot_width    = 50.0f;    // slot cell width (for border strobe)
 float  g_chord_slot_height   = 44.0f;    // slot cell height (for border strobe)
 float  g_chord_badge_gap     = 7.0f;     // vertical gap, badge bottom → slot top
 
+// Slot-outline shape for the strobe + calibrate indicator. Glass HUD
+// slots are rectangular (rounded corners). Stock PSO HUD slots are
+// flat-top hexagons. The user picks the shape to match whichever HUD
+// they're running under; value persists to INI and swaps in/out with
+// the preset buttons.
+//   0 = Rectangle (rounded corners)
+//   1 = Hexagon   (flat-top, 6 vertices)
+int    g_chord_slot_shape    = 0;
+
 // Per-slot X nudges. Added to the pitch-computed X position for each
 // slot so the user can line badges up against a custom HUD whose
 // slot cells aren't at the pitch-grid positions vanilla PSO uses.
@@ -2896,7 +3078,7 @@ float  g_chord_slot_x_offset[10] = {0,0,0,0,0,0,0,0,0,0};
 // produces a steady stream of clicks at g_stick_rate_ms cadence.
 bool g_stick_enabled         = true;
 bool g_stick_zoom_enabled    = true;   // Y axis → mouse wheel
-bool g_stick_invert_y        = false;  // true = up zooms out
+bool g_stick_invert_y        = false;  // true = flip zoom direction
 int  g_stick_deadzone        = 8000;
 int  g_stick_rate_ms         = 250;
 // X-axis is user-bindable. Each field holds a hardware scancode that
@@ -3015,6 +3197,19 @@ static std::unordered_set<uintptr_t> s_seen_boss_bodies;
 // across respawns (fresh body entity gets a new address each fight).
 static std::unordered_map<uintptr_t, uint32_t> s_pinned_shell_count;
 
+// Pinned peak max_hp for collapse/aggregate rows (Vol Opt Monitor ×24,
+// Pillar ×6, any other multi-instance group). Without this, the
+// displayed max drains as instances die — Pillar ×6 = 18000/18000
+// visibly shrinking to Pillar ×4 = 12000/12000 which reads as "bar at
+// 100%" instead of "bar at 66% because a third of the pool is gone."
+//
+// Keyed on agg_key (cls-or-name composite). Updated to max(pinned,
+// frame_total) each frame, then applied back to the row's max_hp.
+// The `count` display stays CURRENT (how many are alive right now),
+// matching the shell pattern — label reads "Pillar ×4" but max
+// remains 18000, so the bar visibly drops to 12000/18000 = 66%.
+static std::unordered_map<uint64_t, uint32_t> s_pinned_aggregate_max;
+
 static std::vector<HpRow> BuildHpRows(const std::vector<Monster> &monsters)
 {
     std::vector<HpRow> rows;
@@ -3022,6 +3217,7 @@ static std::vector<HpRow> BuildHpRows(const std::vector<Monster> &monsters)
     {
         s_seen_boss_bodies.clear();
         s_pinned_shell_count.clear();
+        s_pinned_aggregate_max.clear();
         return rows;
     }
 
@@ -3062,8 +3258,8 @@ static std::vector<HpRow> BuildHpRows(const std::vector<Monster> &monsters)
             // Top bit set to keep name-keyed rows disjoint from
             // cls-keyed rows (cls values are all <0x01000000, so
             // bit 63 is always free for cls keys). Pointer identity
-            // on the LocalizedString is stable: each synthetic is a
-            // file-scope static.
+            // on the synth_name is stable: each is a file-scope static
+            // const char*, so same name → same pointer.
             return (1ULL << 63) |
                    reinterpret_cast<uint64_t>(et.synth_name);
         }
@@ -3220,6 +3416,26 @@ static std::vector<HpRow> BuildHpRows(const std::vector<Monster> &monsters)
             }
         }
     }
+
+    // Pin the peak max_hp for multi-instance aggregate rows. The first
+    // frame of a fight, all members are alive and we see the full pool
+    // — that's our peak. On subsequent frames some members have been
+    // killed and dropped from `monsters`, so the summed max_hp shrinks.
+    // Without pinning, the bar's denominator moves and visual damage
+    // progress resets. Matches the shell-pinning pattern above.
+    //
+    // Only aggregates (count > 1) need pinning. Single-instance rows
+    // carry a stable max_hp from the entity itself.
+    for (const auto &kv : agg_index)
+    {
+        if (kv.second == SIZE_MAX) continue;
+        HpRow &r = rows[kv.second];
+        if (r.count < 2) continue;
+        uint32_t &pinned = s_pinned_aggregate_max[kv.first];
+        if (r.max_hp > pinned) pinned = r.max_hp;
+        r.max_hp = pinned;
+    }
+
     return rows;
 }
 
@@ -3248,13 +3464,14 @@ void render_hp_table(const std::vector<Monster> &monsters)
     if (g_show_count_header)
         ImGui::Text("Enemies: %zu", rows.size());
 
-    // Fixed column widths to prevent layout jumping.
-    // Name: "De Rol Le (Shell ×10)" = 21 chars max
-    // Dist: "(9999u)" = 7 chars
-    // Bar: sized to tightly fit "999999 / 999999 (100%)" — the
-    // widest realistic HP string.  Right-aligned text stays anchored.
+    // Column widths: Dist / Dir / Bar are tight fixed sizes because
+    // their content is bounded ("(9999u)", one arrow glyph, and the
+    // worst-case HP string respectively). The Name column auto-sizes
+    // to whatever the longest name needs this frame — the window's
+    // AlwaysAutoResize + raised max-width constraint lets the whole
+    // panel scale side-to-side as enemy names come and go. No more
+    // 23-char hard truncation.
     const float char_w = 0.55f * ImGui::GetFontSize();
-    const float name_col_w = 23.0f * char_w;
     const float dist_col_w = 7.0f * char_w;   // "(9999u)"
     const float arrow_col_w = ImGui::GetFontSize() + 4.0f; // single arrow glyph
     const float bar_col_w = ImGui::CalcTextSize("999999 / 999999 (100%)").x + 16.0f;
@@ -3263,7 +3480,9 @@ void render_hp_table(const std::vector<Monster> &monsters)
                           ImGuiTableFlags_SizingFixedFit |
                           ImGuiTableFlags_RowBg))
     {
-        ImGui::TableSetupColumn("Name",  ImGuiTableColumnFlags_WidthFixed, name_col_w);
+        // Name column: WidthFixed with init_width=0 → auto-size to the
+        // widest row's content.
+        ImGui::TableSetupColumn("Name",  ImGuiTableColumnFlags_WidthFixed, 0.0f);
         ImGui::TableSetupColumn("Dist",  ImGuiTableColumnFlags_WidthFixed, dist_col_w);
         ImGui::TableSetupColumn("Dir",   ImGuiTableColumnFlags_WidthFixed, arrow_col_w);
         ImGui::TableSetupColumn("Bar",   ImGuiTableColumnFlags_WidthFixed, bar_col_w);
@@ -3287,11 +3506,13 @@ void render_hp_table(const std::vector<Monster> &monsters)
                 ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, hl);
             }
 
-            // Compose the display label — suffix "(×N)" when this is
-            // an aggregate row of more than one monster.
+            // Compose the display label — suffix "(xN)" when this is
+            // an aggregate row of more than one monster. ASCII 'x'
+            // instead of U+00D7 because ReShade's default font has no
+            // glyph for it and it renders as '?'.
             char label[192];
             if (r.count > 1)
-                std::snprintf(label, sizeof(label), "%s  (\xc3\x97%u)",
+                std::snprintf(label, sizeof(label), "%s  (x%u)",
                               r.name.c_str(), r.count);
             else
                 std::snprintf(label, sizeof(label), "%s", r.name.c_str());
@@ -3451,31 +3672,107 @@ static void DrawFloorItemArrow(float world_dx, float world_dz)
     ImGui::Dummy(ImVec2(pad_x + length_2 * 2.0f, line_h));
 }
 
+// Persistent disclosure state for the hidden-items list. Tied to the
+// clickable "(N) hidden [+/-]" portion of the unified items-panel
+// header. Defaults to collapsed so the HUD stays compact on launch —
+// the user opens it when they want to browse what's being filtered.
+static bool g_hidden_items_expanded = false;
+
+// Forward declaration — render_items_table calls this after the main
+// table so the hidden rows render whether or not the visible list is
+// empty (fixed prior bug where empty-state early-return skipped it).
+static void render_hidden_items_section();
+
+// Draws the unified header at the top of the floor-items window.
+// Format examples:
+//   "Floor items: 3"                  — visible only, no hidden
+//   "Floor items: 3 │ 12 (hidden) ▾"  — both, hidden disclosure open
+//   "Floor items: 0 │ 12 (hidden) ▸"  — nothing visible but things hidden
+//   (no header rendered at all if nothing visible AND nothing hidden)
+//
+// The "(N) hidden ▾/▸" portion is a subtle clickable control that
+// flips `g_hidden_items_expanded`. Uses disabled-text styling so it
+// reads as informational but still has a hover highlight to signal
+// interactivity.
+static void render_items_header(size_t visible_count, size_t hidden_count)
+{
+    const bool has_hidden = hidden_count > 0;
+    if (visible_count == 0 && !has_hidden) return;
+
+    // "Floor items: N" prefix (honours the existing g_show_count_header
+    // toggle — user may have turned it off to free screen space, but
+    // the hidden indicator still shows since the user needs that
+    // information to know what they're missing).
+    bool drew_prefix = false;
+    if (g_show_count_header)
+    {
+        ImGui::Text("Floor items: %zu", visible_count);
+        drew_prefix = true;
+    }
+
+    if (!has_hidden) return;
+
+    if (drew_prefix)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+    }
+
+    // ASCII-only disclosure markers — ReShade's default font has no
+    // Unicode box-drawing or arrow glyphs, those render as '?'.
+    char lbl[64];
+    std::snprintf(lbl, sizeof(lbl), "%zu (hidden) %s###hidden_toggle",
+                  hidden_count,
+                  g_hidden_items_expanded ? "[-]" : "[+]");
+
+    // Render the toggle as a button styled to look like TextDisabled —
+    // zero-alpha background, faint hover tint for affordance, disabled
+    // text colour. Matches the rest of the header's visual weight.
+    const ImVec4 dim = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+    ImGui::PushStyleColor(ImGuiCol_Button,        IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(255, 255, 255, 25));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  IM_COL32(255, 255, 255, 50));
+    ImGui::PushStyleColor(ImGuiCol_Text,          dim);
+    if (ImGui::SmallButton(lbl))
+        g_hidden_items_expanded = !g_hidden_items_expanded;
+    ImGui::PopStyleColor(4);
+}
+
 void render_items_table(const std::vector<FloorItem> &items)
 {
     if (items.empty())
     {
-        // Three scopes — pick the wording that matches the active
-        // filters so the user knows whether they've seen "nothing
-        // here in this room", "nothing within walking distance",
-        // or "nothing anywhere in the ship":
-        //
-        //   Room    g_filter_current_area = true
-        //   Nearby  current_area = false AND distance cap enabled
-        //   Global  current_area = false AND distance cap disabled
-        const char *empty_text;
-        if (g_filter_current_area)
-            empty_text = "No items on current floor.";
-        else if (g_item_distance_cap_enabled && g_item_max_distance > 0)
-            empty_text = "No items nearby.";
+        // Header still renders for the hidden count so the user can
+        // see + browse what's being filtered even when nothing's
+        // visible. When there's nothing hidden either, fall back to
+        // the scope-aware "no items" text so the player gets a
+        // meaningful state message rather than a blank window.
+        if (g_hidden_floor_items.empty())
+        {
+            // Three scopes — pick the wording that matches the
+            // active filters:
+            //   Room    g_filter_current_area = true
+            //   Nearby  current_area = false AND distance cap enabled
+            //   Global  current_area = false AND distance cap disabled
+            const char *empty_text;
+            if (g_filter_current_area)
+                empty_text = "No items on current floor.";
+            else if (g_item_distance_cap_enabled && g_item_max_distance > 0)
+                empty_text = "No items nearby.";
+            else
+                empty_text = "No items on any floor.";
+            ImGui::TextDisabled("%s", empty_text);
+        }
         else
-            empty_text = "No items on any floor.";
-        ImGui::TextDisabled("%s", empty_text);
+        {
+            render_items_header(0, g_hidden_floor_items.size());
+        }
+        render_hidden_items_section();
         return;
     }
 
-    if (g_show_count_header)
-        ImGui::Text("Floor items: %zu", items.size());
+    render_items_header(items.size(), g_hidden_floor_items.size());
 
     const DWORD now = GetTickCount();
     // "Show the floor each item is on" is useful whenever we're actually
@@ -3527,6 +3824,10 @@ void render_items_table(const std::vector<FloorItem> &items)
                 ImGui::TextUnformatted(it.display.c_str());
             }
 
+            // Hover tooltip: read-only info (id24, override reason, or
+            // hint to right-click). ImGui tooltips are non-interactive,
+            // so the actual hide/unhide actions live in the right-click
+            // popup below.
             if (ImGui::IsItemHovered())
             {
                 ImGui::BeginTooltip();
@@ -3536,22 +3837,47 @@ void render_items_table(const std::vector<FloorItem> &items)
                     const uint8_t type = it.bytes[0];
                     const uint8_t sub  = it.bytes[1];
                     if (IsRareItem(it.bytes, it.id24))
-                        ImGui::TextDisabled("Hidden — shown: rare item");
+                        ImGui::TextDisabled("Hidden - shown: rare item");
                     else if (type == 0x00 && WeaponHasNotableStats(it.bytes))
-                        ImGui::TextDisabled("Hidden — shown: notable weapon stats");
+                        ImGui::TextDisabled("Hidden - shown: notable weapon stats");
                     else if (type == 0x01 && sub == 0x01 && ArmorHasNotableBonus(it.bytes))
-                        ImGui::TextDisabled("Hidden — shown: notable armor stats");
+                        ImGui::TextDisabled("Hidden - shown: notable armor stats");
                     else if (type == 0x01 && sub == 0x02 && ShieldHasNotableBonus(it.bytes))
-                        ImGui::TextDisabled("Hidden — shown: notable shield stats");
+                        ImGui::TextDisabled("Hidden - shown: notable shield stats");
                     else
-                        ImGui::TextDisabled("Hidden — shown: filter override");
+                        ImGui::TextDisabled("Hidden - shown: filter override");
                 }
-                else if (ImGui::SmallButton("Hide"))
+                else
                 {
-                    g_hidden_ids.insert(it.id24);
-                    AppendUserFilter(it.id24, it.display.c_str());
+                    ImGui::TextDisabled("Right-click to hide");
                 }
                 ImGui::EndTooltip();
+            }
+
+            // Right-click context menu: actual hide/unhide action.
+            char ctx_id[32];
+            std::snprintf(ctx_id, sizeof(ctx_id), "##item_ctx_%06X", it.id24);
+            if (ImGui::BeginPopupContextItem(ctx_id))
+            {
+                ImGui::TextDisabled("%s", it.display.c_str());
+                ImGui::Separator();
+                if (g_hidden_ids.count(it.id24) != 0)
+                {
+                    if (ImGui::MenuItem("Unhide this item"))
+                    {
+                        g_hidden_ids.erase(it.id24);
+                        RemoveUserFilter(it.id24);
+                    }
+                }
+                else
+                {
+                    if (ImGui::MenuItem("Hide this item"))
+                    {
+                        g_hidden_ids.insert(it.id24);
+                        AppendUserFilter(it.id24, it.display.c_str());
+                    }
+                }
+                ImGui::EndPopup();
             }
 
             if (show_area_suffix)
@@ -3588,8 +3914,82 @@ void render_items_table(const std::vector<FloorItem> &items)
 
         ImGui::EndTable();
     }
+
+    render_hidden_items_section();
 }
 
+// Renders the list of hidden items. Disclosure is owned by the unified
+// header's "(N) hidden ▾/▸" toggle (g_hidden_items_expanded), so this
+// function just checks the flag and either draws the rows or bails.
+// Called after the main visible items table in render_items_table.
+static void render_hidden_items_section()
+{
+    if (g_hidden_floor_items.empty()) return;
+    if (!g_hidden_items_expanded) return;
+
+    // Sort: user-hides first (actionable — they get the Unhide
+    // button), then by distance within each reason group.
+    std::sort(g_hidden_floor_items.begin(), g_hidden_floor_items.end(),
+              [](const FloorItem &a, const FloorItem &b) {
+                  const int ra = (a.hide_reason == HideReason::UserHideList) ? 0 : 1;
+                  const int rb = (b.hide_reason == HideReason::UserHideList) ? 0 : 1;
+                  if (ra != rb) return ra < rb;
+                  return a.dist_xz < b.dist_xz;
+              });
+
+    for (const auto &h : g_hidden_floor_items)
+    {
+        ImGui::PushID(static_cast<int>(h.id24));
+        ImGui::TextDisabled("%s", h.display.c_str());
+
+        // Reason tag — cross-floor shows the actual floor name rather
+        // than the generic "other floor" label so the user can tell
+        // at a glance where the item is.
+        ImGui::SameLine();
+        if (h.hide_reason == HideReason::OtherFloor)
+            ImGui::TextDisabled("[%s]", AreaName(h.area));
+        else
+            ImGui::TextDisabled("[%s]", HideReasonLabel(h.hide_reason));
+
+        // Distance + world-direction arrow for same-floor items so
+        // the player can actually navigate to something they've
+        // decided to unhide. Cross-floor items have no meaningful
+        // distance/direction (different coordinate spaces) and get
+        // just the area-name tag already rendered above.
+        if (h.is_on_player_floor && h.dist_xz > 0.001f)
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%.0fu)", h.dist_xz);
+
+            if (g_show_item_arrow &&
+                (h.world_dx != 0.f || h.world_dz != 0.f))
+            {
+                ImGui::SameLine();
+                DrawFloorItemArrow(h.world_dx, h.world_dz);
+            }
+        }
+
+        // Unhide button for user-hide rows only. Previously tried to
+        // right-align via SameLine(0, avail_x - btn_width) but that
+        // formed a feedback loop with AlwaysAutoResize — the window
+        // grew on every frame until it hit max constraint. Now just
+        // flows naturally after the distance tag with default spacing.
+        if (h.hide_reason == HideReason::UserHideList)
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Unhide"))
+            {
+                g_hidden_ids.erase(h.id24);
+                RemoveUserFilter(h.id24);
+            }
+        }
+
+        ImGui::PopID();
+    }
+}
+
+// Kept for the ReShade config-panel preview pane (shows both panels
+// inline in the addon's settings screen regardless of in-game anchors).
 void render_combined_body()
 {
     const bool want_hp    = g_show_monster_hp;
@@ -3740,27 +4140,94 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
                 "the actual render resolution automatically. Enable");
             ImGui::TextDisabled(
                 "calibrate mode below to see the slot hitboxes.");
+
+            // ---- Built-in presets ----
+            // Each preset captures the full geometry stack (centre/
+            // pitch/width/height/badge-gap + per-slot x-offsets) for
+            // one specific HUD layout. Applying one overwrites the
+            // current calibration values. Visual prefs (alpha, hint
+            // badges, flash duration) are kept across preset swaps.
+            struct ChordPreset {
+                const char *name;
+                float center_x, bottom_y, pitch, width, height, badge_gap;
+                int   shape;   // 0 = Rectangle, 1 = Hexagon
+                float offset[10];
+            };
+            static const ChordPreset kPresets[] = {
+                {
+                    "Glass HUD (Modern / PSO2-style)",
+                    939.0f, 1069.0f, 69.0f, 58.0f, 41.0f, 8.0f,
+                    /* shape = */ 0,  // rectangle
+                    { 2.0f, -5.0f, -11.0f, -16.4f, -23.1f,
+                     -28.6f, -34.0f, -40.1f, -46.3f, -52.3f },
+                },
+                {
+                    // Vanilla PSO flat-top hexagonal action palette.
+                    // Values dialed in against the live stock HUD
+                    // in Forest 1 at 1440p (values are 1920x1080
+                    // base coordinates; scale automatically).
+                    "Stock HUD (vanilla PSO)",
+                    914.0f, 1068.0f, 63.0f, 53.0f, 44.0f, 10.0f,
+                    /* shape = */ 1,  // hexagon
+                    { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+                },
+            };
+            ImGui::TextDisabled("Presets:");
+            for (const auto &p : kPresets)
+            {
+                char lbl[96];
+                std::snprintf(lbl, sizeof(lbl), "Apply: %s", p.name);
+                if (ImGui::Button(lbl))
+                {
+                    g_chord_slot_center_x = p.center_x;
+                    g_chord_slot_bottom_y = p.bottom_y;
+                    g_chord_slot_pitch    = p.pitch;
+                    g_chord_slot_width    = p.width;
+                    g_chord_slot_height   = p.height;
+                    g_chord_badge_gap     = p.badge_gap;
+                    g_chord_slot_shape    = p.shape;
+                    for (int i = 0; i < 10; ++i)
+                        g_chord_slot_x_offset[i] = p.offset[i];
+                    g_config_dirty = true;
+                }
+            }
+
+            // Manual shape toggle so the user can flip shape without
+            // blowing away their tuned dimensions.
+            {
+                static const char *kShapeLabels[] = { "Rectangle", "Hexagon" };
+                if (ImGui::Combo("Slot outline shape",
+                                 &g_chord_slot_shape,
+                                 kShapeLabels,
+                                 static_cast<int>(
+                                     sizeof(kShapeLabels) /
+                                     sizeof(kShapeLabels[0]))))
+                {
+                    g_config_dirty = true;
+                }
+            }
+            ImGui::Separator();
             DIRTY_IF(ImGui::Checkbox(
                 "Calibrate mode (draw slot hitboxes)",
                 &g_chord_overlay_calibrate_mode));
             DIRTY_IF(ImGui::SliderFloat(
                 "Slot row center X",
-                &g_chord_slot_center_x, 0.0f, 1920.0f, "%.0f px"));
+                &g_chord_slot_center_x, 0.0f, 1920.0f, "%.1f px"));
             DIRTY_IF(ImGui::SliderFloat(
                 "Slot row bottom Y",
-                &g_chord_slot_bottom_y, 0.0f, 1080.0f, "%.0f px"));
+                &g_chord_slot_bottom_y, 0.0f, 1080.0f, "%.1f px"));
             DIRTY_IF(ImGui::SliderFloat(
                 "Slot pitch (stride between cells)",
-                &g_chord_slot_pitch, 30.0f, 80.0f, "%.0f px"));
+                &g_chord_slot_pitch, 30.0f, 80.0f, "%.1f px"));
             DIRTY_IF(ImGui::SliderFloat(
                 "Slot width",
-                &g_chord_slot_width, 30.0f, 80.0f, "%.0f px"));
+                &g_chord_slot_width, 30.0f, 80.0f, "%.1f px"));
             DIRTY_IF(ImGui::SliderFloat(
                 "Slot height",
-                &g_chord_slot_height, 30.0f, 80.0f, "%.0f px"));
+                &g_chord_slot_height, 30.0f, 80.0f, "%.1f px"));
             DIRTY_IF(ImGui::SliderFloat(
-                "Badge → slot gap",
-                &g_chord_badge_gap, 0.0f, 40.0f, "%.0f px"));
+                "Badge -> slot gap",
+                &g_chord_badge_gap, 0.0f, 40.0f, "%.1f px"));
 
             ImGui::Separator();
             if (ImGui::TreeNode("Per-slot X nudge (custom HUDs)"))
@@ -3898,26 +4365,47 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
                 "eats the injected events and stick zoom won't work.");
         }
         ImGui::TextDisabled(
-            "Stick X → key bindings (0 = unbound; scancode)");
-        DIRTY_IF(ImGui::InputInt(
-            "Left push scancode",  &g_stick_left_scancode));
-        DIRTY_IF(ImGui::InputInt(
-            "Right push scancode", &g_stick_right_scancode));
+            "Stick X -> key bindings (0 = unbound; hex scancode)");
+        // Hex input mode so what the user types matches the hint
+        // values below (0x49 for PgUp, etc.). Previously used decimal
+        // InputInt with hex-labeled hints, which read as a bug:
+        // typing "49" gave 'N' (decimal 49 = hex 0x31) instead of
+        // PgUp (hex 0x49 = decimal 73).
+        {
+            unsigned int lsc = static_cast<unsigned int>(g_stick_left_scancode);
+            if (ImGui::InputScalar("Left push scancode", ImGuiDataType_U32,
+                                   &lsc, nullptr, nullptr, "%02X",
+                                   ImGuiInputTextFlags_CharsHexadecimal))
+            {
+                if (lsc > 255u) lsc = 255u;
+                g_stick_left_scancode = static_cast<int>(lsc);
+                g_config_dirty = true;
+            }
+            unsigned int rsc = static_cast<unsigned int>(g_stick_right_scancode);
+            if (ImGui::InputScalar("Right push scancode", ImGuiDataType_U32,
+                                   &rsc, nullptr, nullptr, "%02X",
+                                   ImGuiInputTextFlags_CharsHexadecimal))
+            {
+                if (rsc > 255u) rsc = 255u;
+                g_stick_right_scancode = static_cast<int>(rsc);
+                g_config_dirty = true;
+            }
+        }
         if (g_stick_left_scancode  < 0) g_stick_left_scancode  = 0;
         if (g_stick_right_scancode < 0) g_stick_right_scancode = 0;
         if (g_stick_left_scancode  > 255) g_stick_left_scancode  = 255;
         if (g_stick_right_scancode > 255) g_stick_right_scancode = 255;
         ImGui::TextDisabled(
-            "Hardware scancode fired on axis push. Common: Q=0x10, E=0x12,");
+            "Hex hardware scancode. Common: Esc=01, Tab=0F, Q=10, E=12,");
         ImGui::TextDisabled(
-            "R=0x13, F=0x21, Tab=0x0F, PgUp=0x49, PgDn=0x51, Esc=0x01.");
+            "R=13, F=21, PgUp=49, PgDn=51, Home=47, End=4F, Up=48, Down=50.");
         DIRTY_IF(ImGui::SliderInt(
             "Deadzone",
             &g_stick_deadzone, 0, 20000));
         ImGui::TextDisabled(
             "Outer circular threshold the stick must cross before");
         ImGui::TextDisabled(
-            "any axis registers. Default 8000 ≈ 25%% of stick range.");
+            "any axis registers. Default 8000 ~= 25%% of stick range.");
         DIRTY_IF(ImGui::SliderInt(
             "Rate (ms between events)",
             &g_stick_rate_ms, 50, 1000));
@@ -3935,6 +4423,14 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
         DIRTY_IF(ImGui::Checkbox(
             "Filter mouse wheel input",
             &g_wheel_filter_enabled));
+        ImGui::TextDisabled(
+            "PSOBB's menus scroll one line per wheel tick, but a single");
+        ImGui::TextDisabled(
+            "touchpad two-finger swipe emits 20-30 micro-ticks, sending");
+        ImGui::TextDisabled(
+            "the menu cursor flying off the end of the list. The filter");
+        ImGui::TextDisabled(
+            "drops or throttles those ticks before they reach the game.");
     if (g_wheel_filter_enabled)
     {
         const char *mode_labels[] = {
@@ -3960,7 +4456,7 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
             ImGui::TextDisabled(
                 "passes; everything within the window is blocked.");
             ImGui::TextDisabled(
-                "Magnitude-agnostic — catches touchpad accumulated");
+                "Magnitude-agnostic - catches touchpad accumulated");
             ImGui::TextDisabled(
                 "deltas that sum above 120 across a poll period.");
         }
@@ -3969,7 +4465,7 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
             ImGui::TextDisabled(
                 "Every mouse-wheel event is dropped unconditionally.");
             ImGui::TextDisabled(
-                "Touchpad scroll and physical mouse wheel both die —");
+                "Touchpad scroll and physical mouse wheel both die;");
             ImGui::TextDisabled(
                 "use keyboard for menu navigation and +/- for camera");
             ImGui::TextDisabled(
@@ -4054,14 +4550,14 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
             "Show direction arrow to each item", &g_show_item_arrow));
         if (g_show_item_arrow)
         {
-            int mode_idx = static_cast<int>(g_arrow_mode);
-            const char *mode_labels[] = {
+            int arrow_idx = static_cast<int>(g_arrow_mode);
+            const char *arrow_labels[] = {
                 "World (fixed minimap-style compass)",
                 "Player-relative (rotates with character)",
             };
-            if (ImGui::Combo("Arrow mode", &mode_idx, mode_labels, 2))
+            if (ImGui::Combo("Arrow mode", &arrow_idx, arrow_labels, 2))
             {
-                g_arrow_mode = static_cast<ArrowMode>(mode_idx);
+                g_arrow_mode = static_cast<ArrowMode>(arrow_idx);
                 g_config_dirty = true;
             }
         }
@@ -4141,55 +4637,69 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
         }
     }
 
-    if (ImGui::CollapsingHeader("Position"))
+    static const char *kAnchorLabels[] = {
+        "Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right",
+        "Top-Center", "Bottom-Center",
+    };
+
+    if (ImGui::CollapsingHeader("Monster HP panel position"))
     {
-        int anchor_idx = static_cast<int>(g_anchor);
-        const char *anchor_labels[] = {
-            "Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right",
-            "Top-Center", "Bottom-Center",
-        };
-        if (ImGui::Combo("Anchor corner", &anchor_idx, anchor_labels, 6))
+        int anchor_idx = static_cast<int>(g_monsters_anchor);
+        if (ImGui::Combo("Anchor##monsters", &anchor_idx, kAnchorLabels, 6))
         {
-            g_anchor = static_cast<Anchor>(anchor_idx);
+            g_monsters_anchor = static_cast<Anchor>(anchor_idx);
             g_config_dirty = true;
         }
 
-        // Quick-set presets. "Below Minimap" anchors top-right and drops the
-        // HUD below PSO's in-game minimap box.
+        if (ImGui::Button("Preset: Left, below allies (default)"))
+        {
+            g_monsters_anchor  = Anchor::TopLeft;
+            g_monsters_window_x = 10.0f;
+            g_monsters_window_y = 400.0f;
+            g_config_dirty = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Preset: Top-Right##monsters"))
+        {
+            g_monsters_anchor  = Anchor::TopRight;
+            g_monsters_window_x = 20.0f;
+            g_monsters_window_y = 20.0f;
+            g_config_dirty = true;
+        }
+
+        DIRTY_IF(ImGui::SliderFloat("X offset##monsters", &g_monsters_window_x,    0.0f, 2000.0f, "%.0f px"));
+        DIRTY_IF(ImGui::SliderFloat("Y offset##monsters", &g_monsters_window_y,    0.0f, 2000.0f, "%.0f px"));
+        DIRTY_IF(ImGui::SliderFloat("BG opacity##monsters", &g_monsters_window_alpha, 0.0f, 1.0f, "%.2f"));
+    }
+
+    if (ImGui::CollapsingHeader("Floor items panel position"))
+    {
+        int anchor_idx = static_cast<int>(g_items_anchor);
+        if (ImGui::Combo("Anchor##items", &anchor_idx, kAnchorLabels, 6))
+        {
+            g_items_anchor = static_cast<Anchor>(anchor_idx);
+            g_config_dirty = true;
+        }
+
         if (ImGui::Button("Preset: Below Minimap (default)"))
         {
-            g_anchor = Anchor::TopRight;
-            g_window_x = 10.0f;
-            g_window_y = 280.0f;
+            g_items_anchor  = Anchor::TopRight;
+            g_items_window_x = 10.0f;
+            g_items_window_y = 280.0f;
             g_config_dirty = true;
         }
         ImGui::SameLine();
-        if (ImGui::Button("Preset: Top-Right"))
+        if (ImGui::Button("Preset: Bottom-Right##items"))
         {
-            g_anchor = Anchor::TopRight;
-            g_window_x = 20.0f;
-            g_window_y = 20.0f;
-            g_config_dirty = true;
-        }
-        if (ImGui::Button("Preset: Bottom-Right"))
-        {
-            g_anchor = Anchor::BottomRight;
-            g_window_x = 20.0f;
-            g_window_y = 180.0f;  // clear the action palette
-            g_config_dirty = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Preset: Top-Left"))
-        {
-            g_anchor = Anchor::TopLeft;
-            g_window_x = 20.0f;
-            g_window_y = 20.0f;
+            g_items_anchor  = Anchor::BottomRight;
+            g_items_window_x = 20.0f;
+            g_items_window_y = 180.0f;
             g_config_dirty = true;
         }
 
-        DIRTY_IF(ImGui::SliderFloat("X offset", &g_window_x, 0.0f, 2000.0f, "%.0f px"));
-        DIRTY_IF(ImGui::SliderFloat("Y offset", &g_window_y, 0.0f, 2000.0f, "%.0f px"));
-        DIRTY_IF(ImGui::SliderFloat("BG opacity", &g_window_alpha, 0.0f, 1.0f, "%.2f"));
+        DIRTY_IF(ImGui::SliderFloat("X offset##items", &g_items_window_x,    0.0f, 2000.0f, "%.0f px"));
+        DIRTY_IF(ImGui::SliderFloat("Y offset##items", &g_items_window_y,    0.0f, 2000.0f, "%.0f px"));
+        DIRTY_IF(ImGui::SliderFloat("BG opacity##items", &g_items_window_alpha, 0.0f, 1.0f, "%.2f"));
     }
 
     ImGui::Separator();
@@ -4303,12 +4813,6 @@ static HpAlertState CheckLowHpAlert()
     return s;
 }
 
-// Render the body of the stats & alerts window. Called from inside the
-// window's Begin/End pair in on_reshade_overlay_event. Draws the HP
-// alert (if firing), followed by the mag feeding timer and XP/hour
-// (both TODO — stubs for now). Returns true if any section had
-// content to show so the caller can decide whether to draw the window
-// frame at all.
 // Snapshot of the player's two technique-buff slots. Used by both the
 // buff window renderer and the reminder pulse logic.
 struct BuffState {
@@ -4373,13 +4877,46 @@ static bool render_buff_body(const BuffState &b)
         ImGui::TextColored(color, "%s%d:%ds", name, level, secs);
         any = true;
     };
-    // Try the game's own tech-name string (unitxt group 5) first
-    // so the panel is locale-aware; fall back to English when the
-    // lookup fails (empty / "Unknown" result). The buff_type enum
-    // may or may not line up 1:1 with the tech_id used by group 5;
-    // if it doesn't, the fallback path keeps the feature working.
+    // The buff-slot type enum (9=Shifta, 10=Deband, 11=Jellen,
+    // 12=Zalure) does NOT match unitxt group 5 tech_ids one-to-one.
+    // Group 5 is the standard sequential PSO tech-name table:
+    //
+    //   tech_id  group 5 name
+    //   ───────  ────────────
+    //      6     Zonde                (confirmed via tech disc display)
+    //      9     Grants
+    //     10     Megid
+    //     11     Shifta
+    //     12     Deband
+    //     13     Jellen
+    //     14     Zalure
+    //
+    // So buff_type 9 (Shifta) must look up tech_id 11, not 9. Prior
+    // code keyed UnitxtRead(5, buff_type) directly, which returned
+    // "Grants" once the Ep2 tech table was populated (Ultimate).
     auto buff_name = [](uint32_t buff_type, const char *fallback) {
-        std::string n = UnitxtRead(5, buff_type);
+        uint32_t tech_id;
+        switch (buff_type) {
+        case  9: tech_id = 11; break;  // Shifta
+        case 10: tech_id = 12; break;  // Deband
+        case 11: tech_id = 13; break;  // Jellen
+        case 12: tech_id = 14; break;  // Zalure
+        default: return std::string(fallback);
+        }
+        std::string n = UnitxtRead(5, tech_id);
+
+        // One-shot diagnostic per buff_type: log what we looked up
+        // and what came back so a future mismatch surfaces in the log
+        // instead of silently showing the wrong tech name.
+        static std::unordered_set<uint32_t> s_buff_logged;
+        if (s_buff_logged.size() < 8 &&
+            s_buff_logged.insert(buff_type).second)
+        {
+            PSO_LOG("buff-name buff_type=%u → tech_id=%u → name='%s' "
+                    "fallback='%s'",
+                    buff_type, tech_id, n.c_str(), fallback);
+        }
+
         if (!n.empty() && n != "Unknown") return n;
         return std::string(fallback);
     };
@@ -4670,16 +5207,6 @@ void on_reshade_overlay_event(reshade::api::effect_runtime *runtime)
                              static_cast<int>(h), ss);
     }
 
-    ImVec2 pos, pivot;
-    compute_anchor_pos(g_anchor, g_window_x, g_window_y,
-                       static_cast<float>(w), static_cast<float>(h),
-                       &pos, &pivot);
-    ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
-    ImGui::SetNextWindowBgAlpha(g_window_alpha);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(240.0f, 0.0f),
-                                        ImVec2(800.0f, FLT_MAX),
-                                        nullptr, nullptr);
-
     constexpr ImGuiWindowFlags kFlags =
         ImGuiWindowFlags_NoTitleBar         |
         ImGuiWindowFlags_NoResize           |
@@ -4692,9 +5219,54 @@ void on_reshade_overlay_event(reshade::api::effect_runtime *runtime)
         ImGuiWindowFlags_NoInputs           |
         ImGuiWindowFlags_AlwaysAutoResize;
 
-    if (ImGui::Begin("##PSO_HUD_Overlay", nullptr, kFlags))
-        render_combined_body();
-    ImGui::End();
+    // Monster HP panel — left side, below allies by default.
+    if (g_show_monster_hp)
+    {
+        ImVec2 pos, pivot;
+        compute_anchor_pos(g_monsters_anchor,
+                           g_monsters_window_x, g_monsters_window_y,
+                           static_cast<float>(w), static_cast<float>(h),
+                           &pos, &pivot);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
+        ImGui::SetNextWindowBgAlpha(g_monsters_window_alpha);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(240.0f, 0.0f),
+                                            ImVec2(800.0f, FLT_MAX),
+                                            nullptr, nullptr);
+        if (ImGui::Begin("##PSO_HUD_Monsters", nullptr, kFlags))
+        {
+            const auto monsters = GetAliveMonsters();
+            render_hp_table(monsters);
+        }
+        ImGui::End();
+    }
+
+    // Floor items panel — where the v1.0 combined panel lived. Uses a
+    // separate flag set that drops NoInputs so hover tooltips and
+    // right-click context menus (Hide / Unhide) can register. Cost:
+    // during gameplay, left-clicks that happen to land inside this
+    // panel get eaten by ImGui instead of passing through to PSO.
+    // Acceptable for HUD-panel real estate and matches the design
+    // intent that hide-list curation is a "pause + adjust" action
+    // done with the ReShade overlay open.
+    if (g_show_floor_items)
+    {
+        constexpr ImGuiWindowFlags kItemsFlags =
+            kFlags & ~ImGuiWindowFlags_NoInputs;
+
+        ImVec2 pos, pivot;
+        compute_anchor_pos(g_items_anchor,
+                           g_items_window_x, g_items_window_y,
+                           static_cast<float>(w), static_cast<float>(h),
+                           &pos, &pivot);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
+        ImGui::SetNextWindowBgAlpha(g_items_window_alpha);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(240.0f, 0.0f),
+                                            ImVec2(800.0f, FLT_MAX),
+                                            nullptr, nullptr);
+        if (ImGui::Begin("##PSO_HUD_Items", nullptr, kItemsFlags))
+            render_items_table(GetFloorItems());
+        ImGui::End();
+    }
 
     // ---- EXP tracker window (top-right by default) ----
     //
@@ -4849,6 +5421,36 @@ void on_reshade_overlay_event(reshade::api::effect_runtime *runtime)
 
         if (pushed_bg) ImGui::PopStyleColor();
     }
+
+    // Draw the slot outline (strobe + calibrate visualisation) as
+    // either a rounded rectangle or a flat-top hexagon, depending on
+    // the user's g_chord_slot_shape setting. `hw` and `hh` are HALF
+    // dimensions (half-width, half-height) of the slot's bounding box.
+    auto draw_slot_outline = [](ImDrawList *dl, ImVec2 c, float hw, float hh,
+                                ImU32 color, float thickness)
+    {
+        if (g_chord_slot_shape == 1)
+        {
+            // Flat-top hexagon: top and bottom edges horizontal (at
+            // half-width from center), left/right tapered to points.
+            const ImVec2 v[6] = {
+                ImVec2(c.x - hw * 0.5f, c.y - hh),
+                ImVec2(c.x + hw * 0.5f, c.y - hh),
+                ImVec2(c.x + hw,        c.y),
+                ImVec2(c.x + hw * 0.5f, c.y + hh),
+                ImVec2(c.x - hw * 0.5f, c.y + hh),
+                ImVec2(c.x - hw,        c.y),
+            };
+            dl->AddPolyline(v, 6, color, ImDrawFlags_Closed, thickness);
+        }
+        else
+        {
+            // Rectangle with rounded corners.
+            dl->AddRect(ImVec2(c.x - hw, c.y - hh),
+                        ImVec2(c.x + hw, c.y + hh),
+                        color, 4.0f, 0, thickness);
+        }
+    };
 
     // ---- Chord overlay: per-slot badges over the palette bar ----
     //
@@ -5056,18 +5658,18 @@ void on_reshade_overlay_event(reshade::api::effect_runtime *runtime)
                     }
                     dl->AddText(tp, text_col, label);
 
-                    // Slot-border strobe: an unfilled rounded rect
-                    // drawn around the underlying palette slot. Fades
-                    // from opaque to transparent over the flash window.
-                    // Also drawn every frame in calibrate mode so the
-                    // user can see the grid while dragging sliders.
+                    // Slot-border strobe: an unfilled outline drawn
+                    // around the underlying palette slot. Shape is
+                    // rectangle or flat-top hexagon depending on
+                    // g_chord_slot_shape. Fades from opaque to
+                    // transparent over the flash window. Also drawn
+                    // every frame in calibrate mode so the user can
+                    // see the grid while dragging sliders.
                     if (flashing || g_chord_overlay_calibrate_mode)
                     {
                         const ImVec2 sc = slot_center(i);
                         const float hw = g_chord_slot_width  * 0.5f * sx;
                         const float hh = g_chord_slot_height * 0.5f * sy;
-                        const ImVec2 smin(sc.x - hw, sc.y - hh);
-                        const ImVec2 smax(sc.x + hw, sc.y + hh);
                         int sa;
                         if (g_chord_overlay_calibrate_mode && !flashing)
                             sa = 120;
@@ -5078,7 +5680,7 @@ void on_reshade_overlay_event(reshade::api::effect_runtime *runtime)
                         const ImU32 strobe_col =
                             (border_col & 0x00FFFFFFu) |
                             (static_cast<uint32_t>(sa) << 24);
-                        dl->AddRect(smin, smax, strobe_col, 4.0f, 0, 2.0f);
+                        draw_slot_outline(dl, sc, hw, hh, strobe_col, 2.0f);
                     }
                 }
 
@@ -5258,6 +5860,54 @@ static void AppendUserFilter(uint32_t id24, const char *name)
     PSO_LOG("AppendUserFilter: added %06X to %s", id24, path.c_str());
 }
 
+// Inverse of AppendUserFilter: rewrite pixelated_mods_hidden.txt with
+// the line matching `id24` removed. Used when the user clicks Unhide
+// in the "Hidden in view" sidebar. Parsing tolerates leading whitespace,
+// `#` comments, and either hex (deduced from 6-digit format) or decimal
+// IDs — matches LoadFilters' parsing style.
+static void RemoveUserFilter(uint32_t id24)
+{
+    if (g_addon_dir.empty()) return;
+    const std::string path = g_addon_dir + "pixelated_mods_hidden.txt";
+
+    // Read all lines into memory, filter out the matching one, write back.
+    std::vector<std::string> kept;
+    {
+        FILE *f = std::fopen(path.c_str(), "r");
+        if (!f) return;
+        char buf[512];
+        while (std::fgets(buf, sizeof(buf), f))
+        {
+            // Find first non-whitespace char
+            const char *p = buf;
+            while (*p == ' ' || *p == '\t') ++p;
+            if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0')
+            {
+                kept.emplace_back(buf);
+                continue;
+            }
+            // Parse leading ID token (hex if 6 chars else decimal).
+            const char *tok_start = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') ++p;
+            const size_t tok_len = static_cast<size_t>(p - tok_start);
+            uint32_t parsed = 0;
+            if (tok_len == 6)
+                parsed = static_cast<uint32_t>(std::strtoul(tok_start, nullptr, 16));
+            else
+                parsed = static_cast<uint32_t>(std::strtoul(tok_start, nullptr, 10));
+            if (parsed != id24)
+                kept.emplace_back(buf);
+        }
+        std::fclose(f);
+    }
+
+    FILE *fw = std::fopen(path.c_str(), "w");
+    if (!fw) return;
+    for (const auto &ln : kept) std::fputs(ln.c_str(), fw);
+    std::fclose(fw);
+    PSO_LOG("RemoveUserFilter: removed %06X from %s", id24, path.c_str());
+}
+
 static void LoadCuratedIdLists()
 {
     if (g_addon_dir.empty())
@@ -5307,10 +5957,20 @@ static void LoadConfig()
         else if (std::strcmp(key, "collapse_boss_parts") == 0) g_collapse_boss_parts = std::atoi(val) != 0;
         else if (std::strcmp(key, "hide_unnamed_monsters") == 0) g_hide_unnamed_monsters = std::atoi(val) != 0;
         else if (std::strcmp(key, "bar_width")         == 0) g_bar_width         = static_cast<float>(std::atof(val));
-        else if (std::strcmp(key, "anchor")            == 0)
+        // Panel anchors. Legacy single-panel keys (anchor/window_x/...)
+        // map to the floor-items panel since v1.0 had the combined panel
+        // in its default position. New configs use explicit items_* and
+        // monsters_* prefixes.
+        else if (std::strcmp(key, "items_anchor") == 0 ||
+                 std::strcmp(key, "anchor")       == 0)
         {
             int a = std::atoi(val);
-            if (a >= 0 && a <= 5) g_anchor = static_cast<Anchor>(a);
+            if (a >= 0 && a <= 5) g_items_anchor = static_cast<Anchor>(a);
+        }
+        else if (std::strcmp(key, "monsters_anchor") == 0)
+        {
+            int a = std::atoi(val);
+            if (a >= 0 && a <= 5) g_monsters_anchor = static_cast<Anchor>(a);
         }
         // XP window (new keys; legacy stats_* keys still read for
         // backwards compat — users with old configs migrate on next save).
@@ -5341,6 +6001,11 @@ static void LoadConfig()
         else if (std::strcmp(key, "chord_slot_width")            == 0) g_chord_slot_width            = static_cast<float>(std::atof(val));
         else if (std::strcmp(key, "chord_slot_height")           == 0) g_chord_slot_height           = static_cast<float>(std::atof(val));
         else if (std::strcmp(key, "chord_badge_gap")             == 0) g_chord_badge_gap             = static_cast<float>(std::atof(val));
+        else if (std::strcmp(key, "chord_slot_shape")            == 0)
+        {
+            const int v = std::atoi(val);
+            if (v == 0 || v == 1) g_chord_slot_shape = v;
+        }
         else if (std::strncmp(key, "chord_slot_x_offset_", 20) == 0)
         {
             // Keys chord_slot_x_offset_0 .. chord_slot_x_offset_9.
@@ -5379,9 +6044,17 @@ static void LoadConfig()
         else if (std::strcmp(key, "buff_panel_alpha")     == 0) g_buff_panel_alpha     = static_cast<float>(std::atof(val));
         else if (std::strcmp(key, "buff_shifta_reminder") == 0) g_buff_shifta_reminder = std::atoi(val) != 0;
         else if (std::strcmp(key, "buff_deband_reminder") == 0) g_buff_deband_reminder = std::atoi(val) != 0;
-        else if (std::strcmp(key, "window_x")          == 0) g_window_x          = static_cast<float>(std::atof(val));
-        else if (std::strcmp(key, "window_y")          == 0) g_window_y          = static_cast<float>(std::atof(val));
-        else if (std::strcmp(key, "window_alpha")      == 0) g_window_alpha      = static_cast<float>(std::atof(val));
+        // Items panel position (legacy window_* keys also accepted).
+        else if (std::strcmp(key, "items_window_x")     == 0 ||
+                 std::strcmp(key, "window_x")           == 0) g_items_window_x     = static_cast<float>(std::atof(val));
+        else if (std::strcmp(key, "items_window_y")     == 0 ||
+                 std::strcmp(key, "window_y")           == 0) g_items_window_y     = static_cast<float>(std::atof(val));
+        else if (std::strcmp(key, "items_window_alpha") == 0 ||
+                 std::strcmp(key, "window_alpha")       == 0) g_items_window_alpha = static_cast<float>(std::atof(val));
+        // Monsters panel position (new keys only).
+        else if (std::strcmp(key, "monsters_window_x")     == 0) g_monsters_window_x     = static_cast<float>(std::atof(val));
+        else if (std::strcmp(key, "monsters_window_y")     == 0) g_monsters_window_y     = static_cast<float>(std::atof(val));
+        else if (std::strcmp(key, "monsters_window_alpha") == 0) g_monsters_window_alpha = static_cast<float>(std::atof(val));
         else if (std::strcmp(key, "filter_mode")       == 0)
         {
             int m = std::atoi(val);
@@ -5462,10 +6135,14 @@ static void SaveConfig()
     std::fprintf(f, "collapse_boss_parts=%d\n", g_collapse_boss_parts ? 1 : 0);
     std::fprintf(f, "hide_unnamed_monsters=%d\n", g_hide_unnamed_monsters ? 1 : 0);
     std::fprintf(f, "bar_width=%.2f\n",       g_bar_width);
-    std::fprintf(f, "anchor=%d\n",            static_cast<int>(g_anchor));
-    std::fprintf(f, "window_x=%.2f\n",        g_window_x);
-    std::fprintf(f, "window_y=%.2f\n",        g_window_y);
-    std::fprintf(f, "window_alpha=%.2f\n",    g_window_alpha);
+    std::fprintf(f, "monsters_anchor=%d\n",       static_cast<int>(g_monsters_anchor));
+    std::fprintf(f, "monsters_window_x=%.2f\n",   g_monsters_window_x);
+    std::fprintf(f, "monsters_window_y=%.2f\n",   g_monsters_window_y);
+    std::fprintf(f, "monsters_window_alpha=%.2f\n", g_monsters_window_alpha);
+    std::fprintf(f, "items_anchor=%d\n",          static_cast<int>(g_items_anchor));
+    std::fprintf(f, "items_window_x=%.2f\n",      g_items_window_x);
+    std::fprintf(f, "items_window_y=%.2f\n",      g_items_window_y);
+    std::fprintf(f, "items_window_alpha=%.2f\n",  g_items_window_alpha);
     std::fprintf(f, "filter_mode=%d\n",         static_cast<int>(g_filter_mode));
     std::fprintf(f, "tech_disk_min_level=%d\n", g_tech_disk_min_level);
     std::fprintf(f, "filter_current_area=%d\n", g_filter_current_area ? 1 : 0);
@@ -5492,6 +6169,7 @@ static void SaveConfig()
     std::fprintf(f, "chord_slot_width=%.2f\n",           g_chord_slot_width);
     std::fprintf(f, "chord_slot_height=%.2f\n",          g_chord_slot_height);
     std::fprintf(f, "chord_badge_gap=%.2f\n",            g_chord_badge_gap);
+    std::fprintf(f, "chord_slot_shape=%d\n",             g_chord_slot_shape);
     for (int i = 0; i < 10; ++i)
         std::fprintf(f, "chord_slot_x_offset_%d=%.2f\n", i, g_chord_slot_x_offset[i]);
     std::fprintf(f, "wheel_filter_enabled=%d\n",         g_wheel_filter_enabled ? 1 : 0);

@@ -45,8 +45,6 @@ uintptr_t ItemPmtPtr          = 0x00A8DC94;
 uintptr_t BossDataPtr         = 0x00A43CC8;
 uintptr_t EphineaMonsterArray = 0x00B5F800;
 uintptr_t EphineaHPScale      = 0x00B5F804;
-uintptr_t LocaleFlag          = 0x00A9CD44;
-
 } // namespace pso_offsets
 
 namespace pso_addresses {
@@ -165,15 +163,6 @@ constexpr Signature kSigFloorItemsArrayPtr = {
 };
 constexpr Signature kSigFloorItemsCountPtr = {
     "FF 35 ?? ?? ?? ?? C7 05 ?? ?? ?? ?? 00 00 00 00", 8
-};
-
-// LocaleFlag: `mov eax, [LocaleFlag]; <... locale-selector function>`
-// Verified via r2: fcn.007933bc loads [0xa9cd44] as the locale index.
-// The surrounding byte context makes the `A1 <addr>` load inside a
-// short function distinctive enough. Pattern anchored on the `call`
-// that follows immediately.
-constexpr Signature kSigLocaleFlag = {
-    "A1 ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0 74", 1
 };
 
 // ----------------------------------------------------------------------------
@@ -337,7 +326,6 @@ void InitializeAndLog()
         { "FloorItemsArrayPtr", &pso_offsets::FloorItemsArrayPtr,  false, &kSigFloorItemsArrayPtr },
         { "FloorItemsCountPtr", &pso_offsets::FloorItemsCountPtr,  false, &kSigFloorItemsCountPtr },
         { "ItemPmtPtr",         &pso_offsets::ItemPmtPtr,          false, &kSigItemPmtPtr         },
-        { "LocaleFlag",         &pso_offsets::LocaleFlag,          false, &kSigLocaleFlag         },
         // Rebase-only: no sig available (or, for Ephinea addresses,
         // not in the original binary's .text at all).
         { "EntityArrayRef",     &pso_offsets::EntityArrayRef,      true,  nullptr                 },

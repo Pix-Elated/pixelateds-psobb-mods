@@ -90,9 +90,6 @@ extern uintptr_t BossDataPtr;
 extern uintptr_t EphineaMonsterArray;
 extern uintptr_t EphineaHPScale;
 
-// Language selector (dword). 0=JP, 1=EN, 2=DE, 3=FR, 4=ES, 5+=CJK.
-extern uintptr_t LocaleFlag;
-
 } // namespace pso_offsets
 
 namespace pso_addresses {

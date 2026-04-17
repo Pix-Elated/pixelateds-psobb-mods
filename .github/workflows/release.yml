@@ -87,10 +87,29 @@ jobs:
           cp pixelated_mods_hidden.txt                "$stage/"
           cp pixelated_mods_monster_hidden.txt        "$stage/"
           cp pixelated_mods_alert.wav                 "$stage/"
+
+          # Optional DirectSound → OpenAL Soft wrapper (DSOAL). Fixes
+          # intermittent audio stuttering / choppy music caused by
+          # Windows' legacy DirectSound emulation. Users can delete
+          # these three files to revert to system DirectSound.
+          mkdir -p "$stage/audio_fix"
+          cp deps/dsoal/dsound.dll                    "$stage/audio_fix/"
+          cp deps/dsoal/dsoal-aldrv.dll               "$stage/audio_fix/"
+          cp deps/dsoal/alsoft.ini                    "$stage/audio_fix/"
+          cp deps/dsoal/DSOAL-License.txt             "$stage/audio_fix/"
+          cp deps/dsoal/DSOAL-ReadMe.txt              "$stage/audio_fix/"
+          cp deps/dsoal/DSOAL-Version.txt             "$stage/audio_fix/"
+          cp deps/dsoal/OpenALSoft-License.txt        "$stage/audio_fix/"
+          cp deps/dsoal/OpenALSoft-License_BSD-3Clause.txt "$stage/audio_fix/"
+          cp deps/dsoal/OpenALSoft-License_PFFFT.txt  "$stage/audio_fix/"
+          cp deps/dsoal/OpenALSoft-ReadMe.txt         "$stage/audio_fix/"
+          cp deps/dsoal/OpenALSoft-Version.txt        "$stage/audio_fix/"
+
           cp README.md                                "$stage/"
           cp INSTALL.txt                              "$stage/"
           cp LICENSE                                  "$stage/"
           ls -la "$stage/"
+          ls -la "$stage/audio_fix/"
 
       # --- Package zip ------------------------------------------------------
 

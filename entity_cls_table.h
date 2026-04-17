@@ -63,7 +63,7 @@
     case 0x00A44814: return { EntityRole::BossSubpart, nullptr }; // bm_boss3_volopt_ap.bml, override
     case 0x00A44844: return { EntityRole::CollapseByName, &kSynthVolOptChandelier }; // bm_boss3_volopt_ap.bml, override
     case 0x00A449D0: return { EntityRole::CollapseByName, &kSynthVolOptMonitor }; // bm_boss3_volopt_ap.bml, override
-    case 0x00A44A18: return { EntityRole::CollapseByName, &kSynthVolOptSpire }; // bm_boss3_volopt_ap.bml, override
+    case 0x00A44A18: return { EntityRole::CollapseByName, &kSynthVolOptPillar }; // bm_boss3_volopt_ap.bml, override
     // Vol Opt Phase 2 body — nullptr display_name, resolves
     // via unitxt (uid 47 → the game's own Phase 2 label per
     // difficulty: "Vol Opt" on Normal/Hard/V.Hard, "Vol Opt ver.2"
@@ -80,13 +80,12 @@
     case 0x00A44CA0: return { EntityRole::BossSubpart, nullptr }; // override
     case 0x00A44CB8: return { EntityRole::BossSubpart, nullptr }; // override
     case 0x00A44CBC: return { EntityRole::BossSubpart, nullptr }; // override
-    // All Dark Falz cls values collapse into one "Dark Falz" row.
-    // The one at 0x00A44D6C is the pre-fight obelisk/placeholder that
-    // sits at fixed pos (-9989, 5, -161); the rest are the active
-    // Phase 1/2 rendered bodies and subparts. CollapseByName lets
-    // BuildHpRows pick min-distance across all instances so the row
-    // tracks whichever copy the player is actually near.
-    case 0x00A44D6C: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, placeholder/obelisk
+    // The pre-fight Dark Falz obelisk at fixed pos (-9989, 5, -161).
+    // Has real HP (confirmed 8000/8000 or 16500/16500 depending on
+    // state) so hp<=0 won't drop it, but the player never interacts
+    // with it — the rest of the Dark Falz cls cluster below is what
+    // actually renders during the fight. Hide via the Hidden role.
+    case 0x00A44D6C: return { EntityRole::Hidden, nullptr }; // darkfalz_dat.bml, peace-area obelisk
     case 0x00A44F40: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, derived
     case 0x00A44F7C: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, derived
     case 0x00A44FAC: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, derived
@@ -104,11 +103,11 @@
     case 0x00A451B0: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, derived
     case 0x00A451E4: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, derived
     case 0x00A45200: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, derived
-    case 0x00A4570C: return { EntityRole::CollapseByName, nullptr }; // darkfalz_dat.bml, derived
-    case 0x00A45804: return { EntityRole::BossSubpart, nullptr }; // inherit:Dark Falz
-    case 0x00A45808: return { EntityRole::BossSubpart, nullptr }; // inherit:Dark Falz
-    case 0x00A45960: return { EntityRole::BossSubpart, nullptr }; // inherit:Dark Falz
-    case 0x00A45964: return { EntityRole::BossSubpart, nullptr }; // inherit:Dark Falz
+    case 0x00A4570C: return { EntityRole::CollapseByName, nullptr }; // Dark Falz phase 1 body (uid=47, confirmed via entity-dump)
+    case 0x00A45804: return { EntityRole::CollapseByName, &kSynthDarkFalzPhase2 }; // Dark Falz phase 2 body (uid=47)
+    case 0x00A45808: return { EntityRole::CollapseByName, &kSynthDarkFalzPhase2 }; // Dark Falz phase 2 body (uid=47, confirmed)
+    case 0x00A45960: return { EntityRole::CollapseByName, &kSynthDarkFalzPhase3 }; // Dark Falz phase 3 body (uid=47, confirmed)
+    case 0x00A45964: return { EntityRole::CollapseByName, &kSynthDarkFalzPhase3 }; // Dark Falz phase 3 body (uid=47)
     case 0x00A45A54: return { EntityRole::CollapseByName, &kSynthDarkFalzDarvant }; // override
     case 0x00A45A58: return { EntityRole::CollapseByName, &kSynthDarkFalzDarvant }; // override
     case 0x00A45A5C: return { EntityRole::CollapseByName, &kSynthDarkFalzDarvant }; // override

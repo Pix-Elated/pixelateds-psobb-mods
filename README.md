@@ -176,6 +176,54 @@ install — no bundled ReShade, no installer.
 
 ---
 
+## Optional audio fix — PSOBB choppy / stuttering music on Windows 10 / 11
+
+Bundled under `audio_fix/` in the release zip. If you've ever heard
+Phantasy Star Online Blue Burst music **skip, chop, cut out, or
+stutter** — especially when entering a lobby, loading a block,
+transitioning from the character select screen, or on the main menu
+— this is the fix.
+
+### What's broken
+
+PSO was built against DirectSound, a Windows 98 / XP-era audio API.
+Starting with Windows Vista, Microsoft deprecated real DirectSound
+and replaced it with a legacy compatibility layer that translates
+DirectSound calls into WASAPI under the hood. That translation layer
+has long-standing bugs that produce steady-state stuttering on
+certain old games, especially during scene transitions. It is not
+PSO's fault, not Ephinea's fault, and not a hardware issue — it's
+Windows' emulation code path. Happens regardless of DXVK shader
+cache state, regardless of audio device format (44.1 kHz vs 48 kHz),
+and regardless of which D3D wrapper you use.
+
+### The fix
+
+**[DSOAL](https://github.com/kcat/dsoal)** — a drop-in `dsound.dll`
+replacement that reimplements DirectSound on top of
+**[OpenAL Soft](https://openal-soft.org/)**, a modern, actively-
+maintained audio library. Instead of Microsoft's buggy emulation,
+PSO's audio goes through `DirectSound → OpenAL Soft → WASAPI`. Same
+output path, working mixer. The chop is gone.
+
+### Install
+
+Copy these three files from the release zip's `audio_fix/` folder
+into your PSOBB install directory (next to `PsoBB.exe`):
+
+- `dsound.dll`
+- `dsoal-aldrv.dll`
+- `alsoft.ini`
+
+**Uninstall** = delete those three files. System DirectSound is
+restored, chop returns.
+
+It does not patch the game, does not touch network packets, is
+trusted by a huge number of old-game communities (Elder Scrolls,
+Half-Life, Deus Ex, etc.). Zero anti-cheat risk.
+
+---
+
 ## Why a ReShade add-on instead of BBMod
 
 I run PSOBB under DXVK on a laptop where native Direct3D crashes
@@ -222,6 +270,10 @@ Third-party libraries under `deps/`:
 - [ReShade](https://github.com/crosire/reshade) add-on SDK (BSD-3)
 - [Dear ImGui](https://github.com/ocornut/imgui) (MIT)
 - [nlohmann/json](https://github.com/nlohmann/json) (MIT)
+- [DSOAL](https://github.com/kcat/dsoal) (LGPL-2.1) — bundled as
+  the optional audio fix
+- [OpenAL Soft](https://openal-soft.org/) (LGPL-2.1) — DSOAL's
+  backend, bundled alongside it
 
 ---
 

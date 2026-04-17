@@ -114,3 +114,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/debugger/CMakeLists.txt" AND
    DEFINED ENV{PIXELATED_BUILD_DEBUGGER})
     add_subdirectory(debugger)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/audio_debugger/CMakeLists.txt" AND
+   DEFINED ENV{PIXELATED_BUILD_AUDIO_DEBUGGER})
+    add_subdirectory(audio_debugger)
+endif()

@@ -734,9 +734,10 @@ static void PollRightStick()
         if (now - s_stick_last_y_tick >= rate)
         {
             s_stick_last_y_tick = now;
-            // Stick up = ry positive = zoom IN by default. Invert
-            // flips the sign so stick up becomes zoom out.
-            bool zoom_in = (ry > 0);
+            // Stick down = ry negative = zoom IN by default, matching
+            // the "pull camera back, push camera forward" convention.
+            // Invert flips the sign so stick up becomes zoom in.
+            bool zoom_in = (ry < 0);
             if (StickMap_InvertY()) zoom_in = !zoom_in;
             SendWheelTap(zoom_in ? WHEEL_DELTA : -WHEEL_DELTA);
         }

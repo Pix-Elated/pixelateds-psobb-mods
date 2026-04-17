@@ -39,7 +39,10 @@ pixelated_mods.log
 # Temporary test dirs from earlier toolchain debugging
 tmptest/
 
-# Local-only debugger addon — not shipped to users. Enabled per-task
-# when reverse engineering new entity layouts; keep out of history.
+# Local-only diagnostic addons — not shipped to users. Enabled per-task
+# when reverse engineering new entity layouts or diagnosing audio
+# stutter; keep out of history.
 /debugger/
+/audio_debugger/
 build_output.log
+build.log

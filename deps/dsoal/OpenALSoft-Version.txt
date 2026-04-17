@@ -1,0 +1,6 @@
+kcat/openal-soft
+master
+5d6583c57b0b6a0c13e255ee2c987e09dd9cb319
+r10540
+Improve and invert narrowing type checks
+2026-04-12 20:07:02 +0000
