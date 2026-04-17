@@ -120,11 +120,19 @@ against a custom HUD.
 
 ![Chord modifier keys showing live LT/RT/RB state](images/modifier_keys.webp)
 
-### Right-stick camera zoom
+### Right-stick remapping
 
-Since the game doesn't use the right stick, the Y axis maps to the
-mouse wheel for camera zoom. The X axis is user-bindable via two
-scancode fields in the config panel — unbound by default.
+Since the game doesn't use the right stick, it's repurposed for
+menu / UI navigation:
+
+- **Up / down** → mouse wheel (camera zoom in / out)
+- **Push left** → PgDn
+- **Push right** → PgUp
+- **R3 (click)** → Esc (edge-triggered, one tap per press)
+
+PgUp / PgDn are sent with the extended-key flag so Windows routes
+them to the nav cluster instead of NumPad 9 / NumPad 3 (which share
+the same hardware scan codes).
 
 Axis-dominance filter so an angled push doesn't fire both at once.
 Configurable deadzone, rate limit, and Y-axis invert.
