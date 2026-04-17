@@ -726,6 +726,17 @@ static void PollRightStick()
     if (!StickMap_Enabled()) return;
     if (s_last_xinput_rc.load(std::memory_order_relaxed) != 0) return;
 
+    // R3 (right thumb click) -> Esc, edge-triggered. Handled first so
+    // it fires on a plain click without the stick also being pushed
+    // past the deadzone (the stick-push gate below would otherwise
+    // early-return and skip the R3 detection entirely).
+    {
+        const bool r3_down = (s_last_xinput.Gamepad.wButtons & XBTN_R3) != 0;
+        if (r3_down && !s_r3_was_down)
+            SendScancodeSimple(kScanEsc, /*extended=*/false);
+        s_r3_was_down = r3_down;
+    }
+
     const SHORT ry = s_last_xinput.Gamepad.sThumbRY;
     const SHORT rx = s_last_xinput.Gamepad.sThumbRX;
     const int ay = (ry < 0) ? -static_cast<int>(ry) : static_cast<int>(ry);
@@ -770,14 +781,6 @@ static void PollRightStick()
             const uint8_t scan = (rx > 0) ? kScanPgUp : kScanPgDn;
             SendScancodeSimple(scan, /*extended=*/true);
         }
-    }
-
-    // R3 (right thumb click) → Esc, edge-triggered. One tap per press.
-    {
-        const bool r3_down = (s_last_xinput.Gamepad.wButtons & XBTN_R3) != 0;
-        if (r3_down && !s_r3_was_down)
-            SendScancodeSimple(kScanEsc, /*extended=*/false);
-        s_r3_was_down = r3_down;
     }
 }
 
