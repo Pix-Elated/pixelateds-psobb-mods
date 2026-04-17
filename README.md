@@ -2,9 +2,11 @@
 
 A ReShade add-on for Phantasy Star Online Blue Burst.
 
+Tested on Ephinea and [PSOBB.io](https://psobb.io).
+
 Memory-read only. No binary patches, no network packets. The only
-write path is `SendInput` keyboard events for the optional controller
-chord remapper.
+write path is `SendInput` keyboard events for the optional
+controller chord remapper.
 
 ![Main HUD with monster HP and floor items panels](images/player_aware_mob_object_tracking.webp)
 
@@ -79,7 +81,9 @@ a rolling EXP / hour rate. Width-locked top-right by default.
 ### Mag feed timer
 
 Countdown to the next mag sync tick, pulses green when it's time
-to feed. Separate top-left window above the game HP bar.
+to feed. Separate top-left window above the game HP bar. Optional
+audible chime on the countdown → ready edge: drop in your own
+`pixelated_mods_mag_chime.wav` to customize the sound.
 
 ### Buff panel
 
@@ -176,6 +180,7 @@ install — no bundled ReShade, no installer.
    - `pixelated_mods_hidden.txt` — floor-item hide list
    - `pixelated_mods_monster_hidden.txt` — monster hide list
    - `pixelated_mods_alert.wav` — *optional*. Low-HP chime.
+   - `pixelated_mods_mag_chime.wav` — *optional*. Mag-ready chime.
 
 3. Launch PSOBB, press **Home**, open the **Add-ons** tab, confirm
    "Pixelated's PSOBB Mods" is listed.
@@ -232,13 +237,29 @@ Half-Life, Deus Ex, etc.). Zero anti-cheat risk.
 
 ---
 
+## Optional cosmetic bundle
+
+A separate release zip ships alongside the main addon:
+
+**`pixelateds-psobb-cosmetic-bundle-<ver>.zip`** — my tuned
+ReShade presets (`PSOBB_HD.ini`, `PSOBB_NoEffects.ini`, `ReShade.ini`)
+plus an install recipe listing every shader pack and texture mod I
+use, with links to each source. None of the third-party work is
+redistributed inside the zip — their licenses forbid it — but the
+recipe walks you through reproducing the exact look from the
+screenshots above.
+
+Grab it from the [Releases](../../releases) page if you want the
+full visual setup. Skip it if you're only here for the HUD.
+
+---
+
 ## Why a ReShade add-on instead of BBMod
 
-I run PSOBB under DXVK on a laptop where native Direct3D crashes
-on external-monitor plug / unplug, and I already had ReShade in my
-stack for HD textures. ReShade supports Vulkan as a first-class
-backend so an add-on drawn through ReShade renders cleanly with no
-translation chain.
+ReShade was already in my stack for HD textures and preset grading,
+and it supports both native Direct3D and translation-layer (DXVK)
+backends as first-class, so an add-on drawn through ReShade renders
+cleanly regardless of which D3D path the client uses.
 
 **The two can coexist** — BBMod owns the `dinput8.dll` file slot,
 this add-on hooks from inside ReShade. Run both if you want.
@@ -271,6 +292,14 @@ vendored under `deps/`.
   source of the drop-table walk logic.
 - **[HybridEidolon](https://github.com/HybridEidolon)** — original
   author of [BBMod](https://github.com/HybridEidolon/psobbaddonplugin).
+
+Bundled audio:
+
+- `pixelated_mods_mag_chime.wav` — "Festive Chime" by **Dragon
+  Studio**, sourced from
+  [Pixabay](https://pixabay.com/sound-effects/) under Pixabay's
+  Content License (free commercial use, no attribution required;
+  credited here anyway).
 
 Third-party libraries under `deps/`:
 

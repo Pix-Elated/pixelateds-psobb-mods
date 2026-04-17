@@ -9,18 +9,18 @@ you do anything else.
 
 Prerequisites
 -------------
-1. A working PSOBB install. The addon has only been tested on
+1. A working PSOBB install. Tested primarily on psobb.io (the
+   recommended server — https://psobb.io) and previously on
    Ephinea. It SHOULD work on Schthack, Ragol, and vanilla PSOBB
    (same Sega base binary, same offsets, same sigscan patterns),
-   but that's unverified — nobody has run it on a non-Ephinea fork
-   yet. File an issue if you try it.
+   but that's unverified. File an issue if you try it.
 2. ReShade 6.7.3 or newer, "with full add-on support", from:
        https://reshade.me
    Install it against your PsoBB.exe with whichever API your game is
-   actually running under. For most PSOBB setups (Ephinea's default,
-   anything using d3d8to9, dgVoodoo, or DXVK's dxvk_d3d9.dll) that's
-   Direct3D 9. If you're running something unusual you already know
-   what API to pick.
+   actually running under. For most PSOBB setups (psobb.io's native
+   D3D9, anything using d3d8to9, dgVoodoo, or DXVK's dxvk_d3d9.dll)
+   that's Direct3D 9. If you're running something unusual you
+   already know what API to pick.
 
 Install
 -------
@@ -31,6 +31,8 @@ installed ReShade:
     pixelated_mods_rares.txt
     pixelated_mods_hidden.txt
     pixelated_mods_monster_hidden.txt
+    pixelated_mods_alert.wav       (optional — low-HP chime)
+    pixelated_mods_mag_chime.wav   (optional — mag-ready chime)
 
 Item names, technique names, and weapon special names are read from
 the game's own data tables at runtime, so there are no _items.txt /
@@ -56,6 +58,12 @@ separate job — use ReShade's own setup to undo that.
 
 Per-server notes
 ----------------
+psobb.io  (recommended)
+    Installer is at https://psobb.io. Install to userland
+    (e.g. %USERPROFILE%\PSOBB.IO\) rather than Program Files so
+    ReShade and the addon can write logs without UAC prompts.
+    Native Direct3D 9 client — tell ReShade to hook D3D9.
+
 Ephinea PSOBB
     Default install path: %USERPROFILE%\EphineaPSO\
     Ephinea's launcher (online.exe) writes renderer config into the

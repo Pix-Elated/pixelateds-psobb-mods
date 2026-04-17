@@ -87,6 +87,7 @@ jobs:
           cp pixelated_mods_hidden.txt                "$stage/"
           cp pixelated_mods_monster_hidden.txt        "$stage/"
           cp pixelated_mods_alert.wav                 "$stage/"
+          cp pixelated_mods_mag_chime.wav             "$stage/"
 
           # Optional DirectSound → OpenAL Soft wrapper (DSOAL). Fixes
           # intermittent audio stuttering / choppy music caused by
@@ -111,9 +112,27 @@ jobs:
           ls -la "$stage/"
           ls -la "$stage/audio_fix/"
 
-      # --- Package zip ------------------------------------------------------
+      # --- Stage cosmetic bundle payload ------------------------------------
 
-      - name: Package zip
+      - name: Stage cosmetic bundle payload
+        shell: bash
+        run: |
+          cb="cosmetic_stage"
+          mkdir -p "$cb"
+          # Only files we authored or configured ourselves — the third-
+          # party shader packs (iMMERSE, PD80, etc.) and texture mods
+          # have licenses that forbid redistribution. cosmetic_bundle/
+          # README.md links to each source for the user to install.
+          cp cosmetic_bundle/ReShade.ini           "$cb/"
+          cp cosmetic_bundle/PSOBB_HD.ini          "$cb/"
+          cp cosmetic_bundle/PSOBB_NoEffects.ini   "$cb/"
+          cp cosmetic_bundle/README.md             "$cb/"
+          cp LICENSE                               "$cb/"
+          ls -la "$cb/"
+
+      # --- Package zips -----------------------------------------------------
+
+      - name: Package main zip
         shell: bash
         run: |
           ver="${{ steps.version.outputs.version }}"
@@ -122,19 +141,32 @@ jobs:
           echo "zip=${zip}" >> "${GITHUB_ENV}"
           ls -la "${zip}"
 
+      - name: Package cosmetic bundle zip
+        shell: bash
+        run: |
+          ver="${{ steps.version.outputs.version }}"
+          czip="pixelateds-psobb-cosmetic-bundle-${ver}.zip"
+          (cd cosmetic_stage && 7z a -tzip "../${czip}" . >/dev/null)
+          echo "czip=${czip}" >> "${GITHUB_ENV}"
+          ls -la "${czip}"
+
       - name: Upload workflow artifacts (non-release runs)
         if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
           name: pixelateds-psobb-mods-${{ steps.version.outputs.version }}
-          path: ${{ env.zip }}
+          path: |
+            ${{ env.zip }}
+            ${{ env.czip }}
           if-no-files-found: error
 
       - name: Create GitHub Release (tag push only)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.zip }}
+          files: |
+            ${{ env.zip }}
+            ${{ env.czip }}
           draft: false
           prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           generate_release_notes: true

@@ -1869,6 +1869,10 @@ static MagTimer GetMagFeedTimer()
 // math works across level-ups without any per-level reset.
 static bool     g_xp_track_enabled       = true;
 static bool     g_mag_timer_enabled      = true;
+// Chime on the "not ready" -> "ready" edge. Same async PlaySoundA
+// path as the low-HP alert. Default off so it doesn't spam anyone
+// who didn't opt in.
+static bool     g_mag_chime_enabled      = false;
 
 // Rolling EXP/hour ring. 500 ms sample cadence over 64 s covers the
 // "what am I earning right now" window — longer averaging adds lag
@@ -4113,6 +4117,14 @@ void draw_pixelated_mods_overlay(reshade::api::effect_runtime *runtime)
             "Show mag feed countdown", &g_mag_timer_enabled));
         ImGui::TextDisabled(
             "Shows seconds until next feed; pulses green when ready.");
+        DIRTY_IF(ImGui::Checkbox(
+            "Chime when mag becomes ready",
+            &g_mag_chime_enabled));
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip(
+                "Plays pixelated_mods_mag_chime.wav from the add-on\n"
+                "directory on the countdown -> ready edge. Drop in\n"
+                "your own WAV of that name to customize the sound.");
     }
 
     if (ImGui::CollapsingHeader("Chord Overlay"))
@@ -4738,25 +4750,36 @@ static void compute_anchor_pos(Anchor anchor, float off_x, float off_y,
 // without a forward-declare dance.
 static std::string g_addon_dir;
 
-// Fire the audible low-HP alert. Plays pixelated_mods_alert.wav from
-// next to the add-on DLL if the file exists, otherwise falls back to
-// the system warning ding via MessageBeep. PlaySound runs async so
-// the render thread doesn't block on audio I/O.
-//
-// Users can replace the WAV with any short clip they like by dropping
-// a file of the same name next to pixelated_mods.addon32. If the file
-// is missing the fallback keeps the alert functional.
-static void PlayLowHpAlertSound()
+// Fire an audible alert. Plays <basename> from next to the add-on
+// DLL if it exists, otherwise falls back to the system warning ding
+// via MessageBeep. PlaySound runs async so the render thread doesn't
+// block on audio I/O. Users can replace the WAV with any short clip
+// by dropping a file of the same name next to pixelated_mods.addon32.
+static void PlayAlertWav(const char *basename)
 {
-    if (!g_addon_dir.empty())
+    if (!g_addon_dir.empty() && basename)
     {
-        const std::string wav = g_addon_dir + "pixelated_mods_alert.wav";
+        const std::string wav = g_addon_dir + basename;
         const DWORD flags =
             SND_FILENAME | SND_ASYNC | SND_NODEFAULT | SND_NOWAIT;
         if (PlaySoundA(wav.c_str(), nullptr, flags))
             return;
     }
     MessageBeep(MB_ICONWARNING);
+}
+
+// Low-HP alert: safe->danger edge transition sound.
+static void PlayLowHpAlertSound()
+{
+    PlayAlertWav("pixelated_mods_alert.wav");
+}
+
+// Mag-ready chime: fires once when the mag's feed countdown hits
+// zero. Uses a different WAV so the user can distinguish it from the
+// low-HP alarm.
+static void PlayMagReadyChime()
+{
+    PlayAlertWav("pixelated_mods_mag_chime.wav");
 }
 
 // Snapshot of the player HP alert state for a single frame. CheckLowHpAlert
@@ -5279,6 +5302,26 @@ void on_reshade_overlay_event(reshade::api::effect_runtime *runtime)
     if (g_mag_timer_enabled)
     {
         const MagTimer mag = GetMagFeedTimer();
+
+        // Fire the chime on the rising edge of mag.ready. Kept
+        // outside the window-visible block so the edge is tracked
+        // even if the user has the window closed / overlapped; and
+        // gated on mag.valid so we don't false-fire when the mag
+        // pointer first resolves.
+        static bool s_mag_was_ready = false;
+        if (mag.valid)
+        {
+            if (mag.ready && !s_mag_was_ready && g_mag_chime_enabled)
+                PlayMagReadyChime();
+            s_mag_was_ready = mag.ready;
+        }
+        else
+        {
+            // No mag (e.g. character swap / not in a game) — reset so
+            // the next valid transition to ready fires the chime.
+            s_mag_was_ready = false;
+        }
+
         if (mag.valid)
         {
             // Fixed position: top-left with small margin, above the game's HP bar
@@ -5957,6 +6000,7 @@ static void LoadConfig()
                  std::strcmp(key, "stats_window_alpha")== 0) g_xp_window_alpha = static_cast<float>(std::atof(val));
         else if (std::strcmp(key, "xp_track_enabled") == 0) g_xp_track_enabled = std::atoi(val) != 0;
         else if (std::strcmp(key, "mag_timer_enabled") == 0) g_mag_timer_enabled = std::atoi(val) != 0;
+        else if (std::strcmp(key, "mag_chime_enabled") == 0) g_mag_chime_enabled = std::atoi(val) != 0;
         else if (std::strcmp(key, "chord_overlay_enabled")       == 0) g_chord_overlay_enabled       = std::atoi(val) != 0;
         else if (std::strcmp(key, "chord_overlay_alpha")         == 0) g_chord_overlay_alpha         = static_cast<float>(std::atof(val));
         else if (std::strcmp(key, "chord_overlay_show_hints")    == 0) g_chord_overlay_show_hints    = std::atoi(val) != 0;
@@ -6126,6 +6170,7 @@ static void SaveConfig()
     std::fprintf(f, "xp_window_alpha=%.2f\n",  g_xp_window_alpha);
     std::fprintf(f, "xp_track_enabled=%d\n",   g_xp_track_enabled ? 1 : 0);
     std::fprintf(f, "mag_timer_enabled=%d\n",  g_mag_timer_enabled ? 1 : 0);
+    std::fprintf(f, "mag_chime_enabled=%d\n",  g_mag_chime_enabled ? 1 : 0);
     std::fprintf(f, "chord_overlay_enabled=%d\n",        g_chord_overlay_enabled ? 1 : 0);
     std::fprintf(f, "chord_overlay_alpha=%.2f\n",        g_chord_overlay_alpha);
     std::fprintf(f, "chord_overlay_show_hints=%d\n",     g_chord_overlay_show_hints ? 1 : 0);
