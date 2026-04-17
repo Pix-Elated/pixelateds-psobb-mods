@@ -8,6 +8,12 @@ Memory-read only. No binary patches, no network packets. The only
 write path is `SendInput` keyboard events for the optional
 controller chord remapper.
 
+All memory addresses are byte-signature-scanned at startup. If a
+PSOBB fork moves things around, the startup log says which
+signature missed and the addon falls back to the hardcoded address.
+Tested against Ephinea's and psobb.io's current binaries; both pass
+sig-scan cleanly.
+
 ![Main HUD with monster HP and floor items panels](images/player_aware_mob_object_tracking.webp)
 
 ---
@@ -252,6 +258,32 @@ screenshots above.
 
 Grab it from the [Releases](../../releases) page if you want the
 full visual setup. Skip it if you're only here for the HUD.
+
+---
+
+## Troubleshooting
+
+### Item names look wrong on a server I'm using
+
+All item, tech, and special names come from the game's own
+`ItemPMT.prs` table and `unitxt` string tables at runtime — no
+hardcoded English item list. If a given server has reworked the
+PMT record layout (e.g. different slot counts, new subtypes), some
+classes may resolve to the wrong name.
+
+To diagnose, add this line to `pixelated_mods.ini`:
+
+```
+pmt_layout_dump=1
+```
+
+Launch the game, log in once, check `pixelated_mods.log` for the
+`pmt-layout` block. The dump lists every header slot's count and
+first two record offsets — that's everything needed to patch the
+walk. File an issue with the log pasted in.
+
+Turn it off (`pmt_layout_dump=0`) after you're done; it adds ~70
+log lines per session.
 
 ---
 

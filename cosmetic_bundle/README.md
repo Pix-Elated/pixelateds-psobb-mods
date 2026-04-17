@@ -6,9 +6,9 @@ main HUD addon screenshots show, layered on top of the recommended
 
 Only files I authored or configured myself ship inside this zip —
 the third-party shader packs and texture mods have licenses that
-forbid redistribution, so instead this README links to each source
-and lists the install order. Expect the setup to take ~20 minutes
-once you have the downloads.
+forbid redistribution, so instead this README walks you through
+acquiring the HD assets and other personal favorites I've found.
+Expect the setup to take ~20 minutes once you have the downloads.
 
 ---
 

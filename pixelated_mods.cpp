@@ -2340,10 +2340,147 @@ static constexpr uint32_t kItemUnitxtGroup    = 1;
 static constexpr uint32_t kTechUnitxtGroup    = 5;
 static constexpr uint32_t kSpecialUnitxtBase  = 0x256;   // offset in group 1
 
+// Optional one-shot PMT-layout dump for bringing up new PSOBB forks.
+// Off by default — enable via `pmt_layout_dump=1` in the INI if an
+// item class is resolving to the wrong name and you need to verify
+// the PMT record layout on your server. Emits ~70 log lines once
+// per session, then goes silent. Enumerates every item-class header
+// slot AND dumps the first two records of each slot as u32 words,
+// covering: array width (2/3-wide shields, sentinel prefix, etc.),
+// record stride validation (rec[0] vs rec[1] content), and where
+// name_idx lives on each record type.
+static bool g_pmt_layout_dump = false;
+
+static void DumpPmtLayoutOnce(uintptr_t pmt)
+{
+    if (!g_pmt_layout_dump) return;
+    static bool s_dumped = false;
+    if (s_dumped) return;
+    s_dumped = true;
+
+    // Dump the first two records of `recs` as six u32s each, so we
+    // can see both name_idx (conventionally rec+0) and surrounding
+    // fields at whatever offset they actually occupy. Two records is
+    // enough to confirm the stride we're walking with — if rec[0] and
+    // rec[1] don't line up, we're reading with the wrong stride.
+    auto dump_two_records = [&](const char *tag, int slot,
+                                uintptr_t recs, uint32_t stride)
+    {
+        auto w = [](uintptr_t p, int off) -> uint32_t
+        {
+            return SafeRead<uint32_t>(p + off);
+        };
+        PSO_LOG("pmt-layout %s[%d] rec0 w=[%u %u %u %u %u %u]",
+                tag, slot,
+                w(recs, 0x00), w(recs, 0x04), w(recs, 0x08),
+                w(recs, 0x0C), w(recs, 0x10), w(recs, 0x14));
+        PSO_LOG("pmt-layout %s[%d] rec1 w=[%u %u %u %u %u %u] stride=%u",
+                tag, slot,
+                w(recs, stride + 0x00), w(recs, stride + 0x04),
+                w(recs, stride + 0x08), w(recs, stride + 0x0C),
+                w(recs, stride + 0x10), w(recs, stride + 0x14),
+                stride);
+    };
+
+    PSO_LOG("pmt-layout dump @ pmt=0x%08X", (unsigned)pmt);
+    const uintptr_t weapons = SafeRead<uintptr_t>(pmt + 0x00);
+    const uintptr_t armsh   = SafeRead<uintptr_t>(pmt + 0x04);
+    const uintptr_t units   = SafeRead<uintptr_t>(pmt + 0x08);
+    const uintptr_t tools   = SafeRead<uintptr_t>(pmt + 0x0C);
+    const uintptr_t mags    = SafeRead<uintptr_t>(pmt + 0x10);
+    PSO_LOG("pmt-layout weapons=0x%08X armsh=0x%08X units=0x%08X "
+            "tools=0x%08X mags=0x%08X",
+            (unsigned)weapons, (unsigned)armsh, (unsigned)units,
+            (unsigned)tools, (unsigned)mags);
+    // Extended header slots. Some PSOBB forks carry extra pointers
+    // after mags (combo table, special weapons, etc.); dumping them
+    // makes sure we haven't misread the header offsets on a new fork.
+    const uintptr_t p14 = SafeRead<uintptr_t>(pmt + 0x14);
+    const uintptr_t p18 = SafeRead<uintptr_t>(pmt + 0x18);
+    const uintptr_t p1C = SafeRead<uintptr_t>(pmt + 0x1C);
+    PSO_LOG("pmt-layout +0x14=0x%08X +0x18=0x%08X +0x1C=0x%08X",
+            (unsigned)p14, (unsigned)p18, (unsigned)p1C);
+
+    // Weapons: pmt+0x00, 44-byte records, 237 subtype slots.
+    // Dump first 8 slots (classes) since 237 would flood the log.
+    // Slot 0 = sabers, slot 1 = swords, slot 2 = daggers, ...
+    if (weapons)
+    {
+        for (int i = 0; i < 8; ++i)
+        {
+            const uintptr_t slot = weapons + i * 8;
+            const uint32_t  cnt  = SafeRead<uint32_t>(slot);
+            const uintptr_t recs = SafeRead<uintptr_t>(slot + 4);
+            PSO_LOG("pmt-layout weapons[%d] count=%u recs=0x%08X",
+                    i, cnt, (unsigned)recs);
+            if (recs && cnt > 0)
+                dump_two_records("weapons", i, recs, 44);
+        }
+    }
+
+    // Armor / shield: pmt+0x04, 32-byte records. Ephinea convention
+    // is 2-wide indexed by (subtype - 1). Dump 6 slots to catch any
+    // sentinel-prefixed variants too.
+    if (armsh)
+    {
+        for (int i = 0; i < 6; ++i)
+        {
+            const uintptr_t slot = armsh + i * 8;
+            const uint32_t  cnt  = SafeRead<uint32_t>(slot);
+            const uintptr_t recs = SafeRead<uintptr_t>(slot + 4);
+            PSO_LOG("pmt-layout armsh[%d] count=%u recs=0x%08X",
+                    i, cnt, (unsigned)recs);
+            if (recs && cnt > 0)
+                dump_two_records("armsh", i, recs, 32);
+        }
+    }
+
+    // Units: pmt+0x08, 20-byte records, flat table (no subtype slots).
+    if (units)
+    {
+        const uint32_t  ucnt  = SafeRead<uint32_t>(units);
+        const uintptr_t urecs = SafeRead<uintptr_t>(units + 4);
+        PSO_LOG("pmt-layout units count=%u recs=0x%08X", ucnt,
+                (unsigned)urecs);
+        if (urecs && ucnt > 0)
+            dump_two_records("units", 0, urecs, 20);
+    }
+
+    // Tools: pmt+0x0C, 24-byte records, 26 subtype slots. Slot 0 is
+    // mates, slot 1 fluids, slot 2 tech disks, slot 3 grinders, ...
+    // Dump the first 8 slots.
+    if (tools)
+    {
+        for (int i = 0; i < 8; ++i)
+        {
+            const uintptr_t slot = tools + i * 8;
+            const uint32_t  cnt  = SafeRead<uint32_t>(slot);
+            const uintptr_t recs = SafeRead<uintptr_t>(slot + 4);
+            PSO_LOG("pmt-layout tools[%d] count=%u recs=0x%08X",
+                    i, cnt, (unsigned)recs);
+            if (recs && cnt > 0)
+                dump_two_records("tools", i, recs, 24);
+        }
+    }
+
+    // Mags: pmt+0x10, 28-byte records, flat table indexed by subtype.
+    if (mags)
+    {
+        const uint32_t  mcnt  = SafeRead<uint32_t>(mags);
+        const uintptr_t mrecs = SafeRead<uintptr_t>(mags + 4);
+        PSO_LOG("pmt-layout mags count=%u recs=0x%08X", mcnt,
+                (unsigned)mrecs);
+        if (mrecs && mcnt > 0)
+            dump_two_records("mags", 0, mrecs, 28);
+    }
+}
+
 static uintptr_t FindItemPmtRecord(const uint8_t b[12])
 {
     const uintptr_t pmt = SafeRead<uintptr_t>(pso_offsets::ItemPmtPtr);
     if (pmt == 0) return 0;
+
+    DumpPmtLayoutOnce(pmt);
 
     const uint8_t type    = b[0];
     const uint8_t subtype = b[1];
@@ -2375,11 +2512,18 @@ static uintptr_t FindItemPmtRecord(const uint8_t b[12])
 
     case 0x01: { // armor / shield / unit
         if (subtype == 0x01 || subtype == 0x02) {
-            // Armor (sub=1) and shield (sub=2): pmt+0x04, 32-byte.
-            // Array is 2-wide indexed by (sub-1).
+            // Armor (sub=1) and shield (sub=2): pmt+0x04 is a 2-wide
+            // {u32 count; Rec *recs}[] header array indexed by
+            // (subtype - 1). Record stride 32. Verified against live
+            // PMT dump: armors rec0 name_idx=640 ("Frame"), shields
+            // rec0 name_idx=728 ("Barrier"). Earlier walks incorrectly
+            // claimed 3 slots indexed by raw subtype — on armor it
+            // returned the first shield record, on shield it overran
+            // into the Units struct returning a unit record ("Barrier"
+            // displaying as "Knight/Power [+2 DFP +4 EVP]").
             const uintptr_t ax = SafeRead<uintptr_t>(pmt + 0x04);
             if (ax == 0) return 0;
-            return walk(ax, 3, subtype, variant, 32);
+            return walk(ax, 2, subtype - 1u, variant, 32);
         }
         if (subtype == 0x03) {
             // Unit: pmt+0x08, 20-byte, flat table.
@@ -2432,39 +2576,22 @@ static std::string GetItemUnitxtName(const uint8_t b[12])
     const uintptr_t rec = FindItemPmtRecord(b);
     if (rec == 0)
     {
-        // One-shot diagnostic: log each distinct (type, sub, var)
-        // combination that fails the PMT walk so the user can share
-        // the log and we can see whether count==0, recs==null, or
-        // var overshoots the record count.
-        static std::unordered_set<uint32_t> s_rec_fail_seen;
-        const uint32_t key = (uint32_t(b[0]) << 16) |
-                             (uint32_t(b[1]) << 8)  |
-                              uint32_t(b[2]);
-        if (s_rec_fail_seen.size() < 32 &&
-            s_rec_fail_seen.insert(key).second)
-        {
-            PSO_LOG("pmt-miss rec=null type=0x%02X sub=0x%02X "
-                    "var=0x%02X (id24=%06X) b[5]=%u",
-                    b[0], b[1], b[2], key, b[5]);
-        }
+        // Type 0x04 (Meseta) and any other non-item blob (status
+        // effects, quest markers, etc.) hit this path. Silent return
+        // — the caller has its own formatting for Meseta.
         return {};
     }
+    // name_idx=0 is VALID for tool records: tool unitxt indices are
+    // small (0=Monomate, 1=Dimate, 2=Trimate, 3=Monofluid, etc.).
+    // The game's own fcn.005d2aac passes the raw name_idx straight to
+    // the unitxt accessor without a zero check — it treats 0 as a
+    // legitimate index into group 1. Weapons/armor/shield/units all
+    // happen to start at name_idx >= 177 so a zero check *seemed*
+    // safe during Ephinea-only development, but it silently broke
+    // every tool drop. Just let UnitxtRead decide: it returns empty
+    // for truly bogus indices (out of range / "Unknown"), which the
+    // downstream empty-string check below handles.
     const uint32_t name_idx = SafeRead<uint32_t>(rec);
-    if (name_idx == 0)
-    {
-        static std::unordered_set<uint32_t> s_nidx_fail_seen;
-        const uint32_t key = (uint32_t(b[0]) << 16) |
-                             (uint32_t(b[1]) << 8)  |
-                              uint32_t(b[2]);
-        if (s_nidx_fail_seen.size() < 32 &&
-            s_nidx_fail_seen.insert(key).second)
-        {
-            PSO_LOG("pmt-miss name_idx=0 type=0x%02X sub=0x%02X "
-                    "var=0x%02X (id24=%06X) rec=0x%08X",
-                    b[0], b[1], b[2], key, (unsigned)rec);
-        }
-        return {};
-    }
     std::string s = UnitxtRead(kItemUnitxtGroup, name_idx);
     if (s.empty() || s == "Unknown")
     {
@@ -5181,6 +5308,19 @@ void on_reshade_overlay_event(reshade::api::effect_runtime *runtime)
     // Prevents "(no alerts)" and "No enemies" on title/login screen.
     if (GetLocalPlayerPtr() == 0) return;
 
+    // Fire the one-shot PMT layout dump as soon as ItemPMT.prs is
+    // loaded, which happens before the player first lands in the
+    // lobby. Without this, the dump only fires when a floor item
+    // enters the classifier — meaning the user has to walk past
+    // specific items of each class before we get ground truth for
+    // their PMT layout. Calling it once per frame is a no-op after
+    // the first fire (internal static bool gate).
+    {
+        const uintptr_t pmt = SafeRead<uintptr_t>(pso_offsets::ItemPmtPtr);
+        if (pmt != 0)
+            DumpPmtLayoutOnce(pmt);
+    }
+
     uint32_t w = 0, h = 0;
     if (runtime != nullptr)
         runtime->get_screenshot_width_and_height(&w, &h);
@@ -6003,6 +6143,7 @@ static void LoadConfig()
         else if (std::strcmp(key, "xp_track_enabled") == 0) g_xp_track_enabled = std::atoi(val) != 0;
         else if (std::strcmp(key, "mag_timer_enabled") == 0) g_mag_timer_enabled = std::atoi(val) != 0;
         else if (std::strcmp(key, "mag_chime_enabled") == 0) g_mag_chime_enabled = std::atoi(val) != 0;
+        else if (std::strcmp(key, "pmt_layout_dump") == 0)   g_pmt_layout_dump = std::atoi(val) != 0;
         else if (std::strcmp(key, "chord_overlay_enabled")       == 0) g_chord_overlay_enabled       = std::atoi(val) != 0;
         else if (std::strcmp(key, "chord_overlay_alpha")         == 0) g_chord_overlay_alpha         = static_cast<float>(std::atof(val));
         else if (std::strcmp(key, "chord_overlay_show_hints")    == 0) g_chord_overlay_show_hints    = std::atoi(val) != 0;
@@ -6173,6 +6314,7 @@ static void SaveConfig()
     std::fprintf(f, "xp_track_enabled=%d\n",   g_xp_track_enabled ? 1 : 0);
     std::fprintf(f, "mag_timer_enabled=%d\n",  g_mag_timer_enabled ? 1 : 0);
     std::fprintf(f, "mag_chime_enabled=%d\n",  g_mag_chime_enabled ? 1 : 0);
+    std::fprintf(f, "pmt_layout_dump=%d\n",    g_pmt_layout_dump ? 1 : 0);
     std::fprintf(f, "chord_overlay_enabled=%d\n",        g_chord_overlay_enabled ? 1 : 0);
     std::fprintf(f, "chord_overlay_alpha=%.2f\n",        g_chord_overlay_alpha);
     std::fprintf(f, "chord_overlay_show_hints=%d\n",     g_chord_overlay_show_hints ? 1 : 0);
