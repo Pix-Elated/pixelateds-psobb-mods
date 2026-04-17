@@ -253,8 +253,8 @@ ReShade presets (`PSOBB_HD.ini`, `PSOBB_NoEffects.ini`, `ReShade.ini`)
 plus an install recipe listing every shader pack and texture mod I
 use, with links to each source. None of the third-party work is
 redistributed inside the zip — their licenses forbid it — but the
-recipe walks you through reproducing the exact look from the
-screenshots above.
+recipe walks you through acquiring the HD assets and other personal
+favorites I've found.
 
 Grab it from the [Releases](../../releases) page if you want the
 full visual setup. Skip it if you're only here for the HUD.

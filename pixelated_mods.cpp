@@ -1926,20 +1926,51 @@ static uint32_t ComputeXpGained(const PlayerXp &xp)
     return xp.exp - g_xp_session_baseline;
 }
 
-// EXP/hour rate across the rolling ring. Returns 0.0 before the ring
-// has at least one second of history or if samples go backwards
-// (character switch mid-window).
+// EXP/hour rate. First tries the 64-second rolling ring ("what am I
+// earning right now"), and falls back to the session average
+// (gained / elapsed) when the ring is flat — i.e. standing in a
+// shop, AFK in a lobby, or mid-cutscene. Without the fallback the
+// display reads 0/hr whenever you stop farming for more than 64s,
+// which a user reading "EXP Gained: 781 (55m57s) | EXP/hr: 0"
+// (real session with a static rolling window) reasonably called a
+// regression.
 static double ComputeXpPerHour()
 {
-    if (g_xp_count < 2) return 0.0;
-    const int oldest_idx = (g_xp_count < kXpSampleCount) ? 0 : g_xp_head;
-    const int newest_idx = (g_xp_head - 1 + kXpSampleCount) % kXpSampleCount;
-    const XpSample &oldest = g_xp_samples[oldest_idx];
-    const XpSample &newest = g_xp_samples[newest_idx];
-    const DWORD dt_ms = newest.tick - oldest.tick;
-    if (dt_ms < 1000)            return 0.0;
-    if (newest.exp < oldest.exp) return 0.0;
-    const double dexp = static_cast<double>(newest.exp - oldest.exp);
+    double rate = 0.0;
+
+    // 1. Rolling ring rate (preferred when the player is actively
+    //    earning, since it reacts quickly to rate changes).
+    if (g_xp_count >= 2) {
+        const int oldest_idx = (g_xp_count < kXpSampleCount) ? 0 : g_xp_head;
+        const int newest_idx = (g_xp_head - 1 + kXpSampleCount) % kXpSampleCount;
+        const XpSample &oldest = g_xp_samples[oldest_idx];
+        const XpSample &newest = g_xp_samples[newest_idx];
+        const DWORD dt_ms = newest.tick - oldest.tick;
+        if (dt_ms >= 1000 && newest.exp >= oldest.exp) {
+            const double dexp = static_cast<double>(newest.exp - oldest.exp);
+            const double dhr  = static_cast<double>(dt_ms) / 3600000.0;
+            rate = dexp / dhr;
+        }
+    }
+    if (rate > 0.0) return rate;
+
+    // 2. Session-average fallback. Uses the anchor set in
+    //    UpdateXpTracker (g_xp_session_baseline + start_tick). Only
+    //    kicks in once the session has accumulated at least a few
+    //    seconds of history, otherwise a 500ms-old session with a
+    //    single EXP pickup would report millions/hr.
+    if (!g_xp_session_baseline_set) return 0.0;
+    const DWORD now    = GetTickCount();
+    const DWORD dt_ms  = now - g_xp_session_start_tick;
+    if (dt_ms < 10000) return 0.0;          // wait 10s before falling back
+    const XpSample *newest = nullptr;
+    if (g_xp_count >= 1) {
+        const int newest_idx = (g_xp_head - 1 + kXpSampleCount) % kXpSampleCount;
+        newest = &g_xp_samples[newest_idx];
+    }
+    if (!newest || newest->exp < g_xp_session_baseline) return 0.0;
+    const double dexp = static_cast<double>(newest->exp - g_xp_session_baseline);
+    if (dexp < 1.0)    return 0.0;          // nothing earned yet
     const double dhr  = static_cast<double>(dt_ms) / 3600000.0;
     return dexp / dhr;
 }
