@@ -5029,47 +5029,32 @@ static bool render_buff_body(const BuffState &b)
         ImGui::TextColored(color, "%s%d:%ds", name, level, secs);
         any = true;
     };
-    // The buff-slot type enum (9=Shifta, 10=Deband, 11=Jellen,
-    // 12=Zalure) does NOT match unitxt group 5 tech_ids one-to-one.
-    // Group 5 is the standard sequential PSO tech-name table:
+    // Buff name resolution. The buff-slot `type` enum (9=Shifta,
+    // 10=Deband, 11=Jellen, 12=Zalure) does NOT cleanly line up with
+    // unitxt group 5 indices across every PSOBB fork — and critically,
+    // the shift table isn't stable. Each server can (and does) ship a
+    // different ItemPMT + unitxt, and group 5 gets reshuffled.
     //
-    //   tech_id  group 5 name
-    //   ───────  ────────────
-    //      6     Zonde                (confirmed via tech disc display)
-    //      9     Grants
-    //     10     Megid
-    //     11     Shifta
-    //     12     Deband
-    //     13     Jellen
-    //     14     Zalure
+    // History of this code:
+    //   * Ephinea: UnitxtRead(5, buff_type) returned "Grants" for
+    //     Shifta on Ultimate. Diagnosed as group 5 being indexed
+    //     starting at Foie=0, so Shifta=11, Deband=12, Jellen=13,
+    //     Zalure=14. We added a +2 shift.
+    //   * psobb.io: UnitxtRead(5, 11) returns "Jellen" and
+    //     UnitxtRead(5, 12) returns "Zalure" — same buff_type enum,
+    //     same +2 shift, wrong answer. Confirmed via live log:
+    //       buff-name buff_type=9  tech_id=11 name='Jellen'
+    //       buff-name buff_type=10 tech_id=12 name='Zalure'
+    //     Meaning: on psobb.io group 5 is indexed such that
+    //     buff_type IS tech_id (Shifta=9, Deband=10, Jellen=11,
+    //     Zalure=12). No shift.
     //
-    // So buff_type 9 (Shifta) must look up tech_id 11, not 9. Prior
-    // code keyed UnitxtRead(5, buff_type) directly, which returned
-    // "Grants" once the Ep2 tech table was populated (Ultimate).
-    auto buff_name = [](uint32_t buff_type, const char *fallback) {
-        uint32_t tech_id;
-        switch (buff_type) {
-        case  9: tech_id = 11; break;  // Shifta
-        case 10: tech_id = 12; break;  // Deband
-        case 11: tech_id = 13; break;  // Jellen
-        case 12: tech_id = 14; break;  // Zalure
-        default: return std::string(fallback);
-        }
-        std::string n = UnitxtRead(5, tech_id);
-
-        // One-shot diagnostic per buff_type: log what we looked up
-        // and what came back so a future mismatch surfaces in the log
-        // instead of silently showing the wrong tech name.
-        static std::unordered_set<uint32_t> s_buff_logged;
-        if (s_buff_logged.size() < 8 &&
-            s_buff_logged.insert(buff_type).second)
-        {
-            PSO_LOG("buff-name buff_type=%u → tech_id=%u → name='%s' "
-                    "fallback='%s'",
-                    buff_type, tech_id, n.c_str(), fallback);
-        }
-
-        if (!n.empty() && n != "Unknown") return n;
+    // Rather than keep adding server-specific shift tables, just use
+    // the hardcoded fallback strings. We don't actually need unitxt
+    // here — these are four English status words we can ship ourselves.
+    // Keeps the code server-agnostic and eliminates a whole class of
+    // drift bugs.
+    auto buff_name = [](uint32_t /*buff_type*/, const char *fallback) {
         return std::string(fallback);
     };
 
